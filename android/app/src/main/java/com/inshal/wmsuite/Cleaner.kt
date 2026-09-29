@@ -7,13 +7,27 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Port of the wmsuite Python scanner/organizer to plain file APIs so the
- * same cleaning power runs natively on the phone.
+ * Native port of the wmsuite scanner/cleaner: category scan with a
+ * sent/received split, scoped cleaning, keep-earliest duplicate removal,
+ * date organizing and status saving.
  */
 object Cleaner {
 
-    data class CategoryStat(val name: String, val folder: File, val files: Int, val bytes: Long)
+    data class CategoryStat(
+        val name: String,
+        val folder: File,
+        val files: Int,
+        val bytes: Long,
+        val sentFiles: Int,
+        val sentBytes: Long
+    )
+
     data class Result(val count: Int, val bytes: Long)
+
+    /** Scope values for cleanFolder(). */
+    const val SCOPE_ALL = 0
+    const val SCOPE_RECEIVED = 1
+    const val SCOPE_SENT = 2
 
     private val FOLDER_TO_CATEGORY = linkedMapOf(
         "WhatsApp Images" to "Images",
@@ -48,6 +62,16 @@ object Cleaner {
         return n.toString() + " B"
     }
 
+    /** True when the file lives inside a "Sent" folder of any level. */
+    fun isSent(file: File): Boolean {
+        var d = file.parentFile
+        while (d != null) {
+            if (d.name.equals("Sent", ignoreCase = true)) return true
+            d = d.parentFile
+        }
+        return false
+    }
+
     /** Category (name + owning folder) for a file inside the WhatsApp root, or null. */
     fun categoryFor(file: File, root: File): Pair<String, File>? {
         var d: File? = file.parentFile
@@ -76,23 +100,38 @@ object Cleaner {
         return null
     }
 
+    private class Tally(var files: Int, var bytes: Long, var sentFiles: Int, var sentBytes: Long)
+
     fun scan(root: File): List<CategoryStat> {
-        val byCat = LinkedHashMap<String, CategoryStat>()
+        val tally = LinkedHashMap<String, Tally>()
+        val folderBy = HashMap<String, File>()
         val files = root.walkTopDown().filter { it.isFile && !it.name.startsWith(".") }.toList()
         for (f in files) {
             val c = categoryFor(f, root) ?: continue
-            val cur = byCat[c.first]
-            byCat[c.first] = CategoryStat(
-                c.first, c.second,
-                (cur?.files ?: 0) + 1,
-                (cur?.bytes ?: 0) + f.length()
-            )
+            val t = tally.getOrPut(c.first) { Tally(0, 0, 0, 0) }
+            t.files++
+            t.bytes += f.length()
+            if (isSent(f)) {
+                t.sentFiles++
+                t.sentBytes += f.length()
+            }
+            if (!folderBy.containsKey(c.first)) folderBy[c.first] = c.second
         }
-        return byCat.values.toList()
+        val out = mutableListOf<CategoryStat>()
+        for ((name, t) in tally) {
+            out.add(CategoryStat(name, folderBy[name]!!, t.files, t.bytes, t.sentFiles, t.sentBytes))
+        }
+        return out
     }
 
-    fun cleanFolder(folder: File, dry: Boolean): Result {
-        val files = folder.walkTopDown().filter { it.isFile && !it.name.startsWith(".") }.toList()
+    /** Deletes files in the category folder. Scope: all / received only / sent only. */
+    fun cleanFolder(folder: File, dry: Boolean, scope: Int): Result {
+        val files = folder.walkTopDown().filter { f ->
+            f.isFile && !f.name.startsWith(".") &&
+                (scope == SCOPE_ALL ||
+                    (scope == SCOPE_RECEIVED && !isSent(f)) ||
+                    (scope == SCOPE_SENT && isSent(f)))
+        }.toList()
         var bytes = 0L
         for (f in files) bytes += f.length()
         if (!dry) {
@@ -185,50 +224,76 @@ object Cleaner {
         return Result(count, bytes)
     }
 
-    fun findDuplicates(root: File, dry: Boolean): Result {
-        val bySize = HashMap<Long, MutableList<File>>()
+    /** Groups of files with identical content (same size + same SHA-256). */
+    fun findDuplicateGroups(root: File): List<List<File>> {
         val files = root.walkTopDown().filter {
             it.isFile && !it.name.startsWith(".") && categoryFor(it, root) != null
         }.toList()
+        val bySize = HashMap<Long, MutableList<File>>()
         for (f in files) bySize.getOrPut(f.length()) { mutableListOf() }.add(f)
+        val md = MessageDigest.getInstance("SHA-256")
+        val groups = mutableListOf<List<File>>()
+        for (sizeGroup in bySize.values) {
+            if (sizeGroup.size < 2) continue
+            val byHash = HashMap<String, MutableList<File>>()
+            for (f in sizeGroup) byHash.getOrPut(sha256(md, f)) { mutableListOf() }.add(f)
+            for (dups in byHash.values) {
+                if (dups.size >= 2) groups.add(dups.toList())
+            }
+        }
+        return groups
+    }
+
+    /**
+     * Removes the extra copies of every duplicate group, ALWAYS keeping
+     * the earliest file (filename timestamp, else file modification date)
+     * as the original.
+     */
+    fun deleteDuplicateGroups(groups: List<List<File>>, dry: Boolean): Result {
         var count = 0
         var bytes = 0L
-        val md = MessageDigest.getInstance("SHA-256")
-        for (group in bySize.values) {
-            if (group.size < 2) continue
-            val byHash = HashMap<String, MutableList<File>>()
-            for (f in group) byHash.getOrPut(sha256(md, f)) { mutableListOf() }.add(f)
-            for (dups in byHash.values) {
-                if (dups.size < 2) continue
-                val sorted = dups.sortedWith(compareBy({ it.name.length }, { it.name }))
-                for (i in 1 until sorted.size) {
-                    bytes += sorted[i].length()
-                    count++
-                    if (!dry) sorted[i].delete()
-                }
+        for (g in groups) {
+            if (g.size < 2) continue
+            val sorted = g.sortedBy { parseTimestamp(it.name) ?: it.lastModified() }
+            for (i in 1 until sorted.size) {
+                val f = sorted[i]
+                bytes += f.length()
+                count++
+                if (!dry) f.delete()
             }
         }
         return Result(count, bytes)
     }
 
-    private fun sha256(md: MessageDigest, f: File): String {
-        md.reset()
-        f.inputStream().use { ins ->
-            val buf = ByteArray(65536)
-            while (true) {
-                val r = ins.read(buf)
-                if (r < 0) break
-                md.update(buf, 0, r)
+    /** Timestamp encoded in a WhatsApp media filename, or null. */
+    fun parseTimestamp(name: String): Long? {
+        val m = LEGACY_RE.find(name)
+        if (m != null) {
+            try {
+                val fmt = SimpleDateFormat("yyyyMMdd", Locale.US)
+                fmt.isLenient = false
+                return fmt.parse(m.groupValues[2] + m.groupValues[3] + m.groupValues[4])?.time
+            } catch (e: Exception) {
+                // fall through
             }
         }
-        val sb = StringBuilder()
-        for (b in md.digest()) {
-            val v = b.toInt() and 0xff
-            if (v < 16) sb.append('0')
-            sb.append(v.toString(16))
+        val mm = MODERN_RE.find(name)
+        if (mm != null) {
+            try {
+                val fmt = SimpleDateFormat("yyyy-MM-dd HH.mm.ss", Locale.US)
+                fmt.isLenient = false
+                return fmt.parse(
+                    mm.groupValues[2] + "-" + mm.groupValues[3] + "-" + mm.groupValues[4] +
+                        " " + mm.groupValues[5] + "." + mm.groupValues[6] + "." + mm.groupValues[7]
+                )?.time
+            } catch (e: Exception) {
+                // fall through
+            }
         }
-        return sb.toString()
+        return null
     }
+
+    private fun timestampFor(f: File): Date = Date(parseTimestamp(f.name) ?: f.lastModified())
 
     fun organizeByDate(root: File, out: File, dry: Boolean): Result {
         val monthFmt = SimpleDateFormat("yyyy-MM", Locale.US)
@@ -251,30 +316,22 @@ object Cleaner {
         return Result(count, bytes)
     }
 
-    private fun timestampFor(f: File): Date {
-        val m = LEGACY_RE.find(f.name)
-        if (m != null) {
-            try {
-                val fmt = SimpleDateFormat("yyyyMMdd", Locale.US)
-                fmt.isLenient = false
-                return fmt.parse(m.groupValues[2] + m.groupValues[3] + m.groupValues[4])
-            } catch (e: Exception) {
-                // fall through
+    private fun sha256(md: MessageDigest, f: File): String {
+        md.reset()
+        f.inputStream().use { ins ->
+            val buf = ByteArray(65536)
+            while (true) {
+                val r = ins.read(buf)
+                if (r < 0) break
+                md.update(buf, 0, r)
             }
         }
-        val mm = MODERN_RE.find(f.name)
-        if (mm != null) {
-            try {
-                val fmt = SimpleDateFormat("yyyy-MM-dd HH.mm.ss", Locale.US)
-                fmt.isLenient = false
-                return fmt.parse(
-                    mm.groupValues[2] + "-" + mm.groupValues[3] + "-" + mm.groupValues[4] +
-                        " " + mm.groupValues[5] + "." + mm.groupValues[6] + "." + mm.groupValues[7]
-                )
-            } catch (e: Exception) {
-                // fall through
-            }
+        val sb = StringBuilder()
+        for (b in md.digest()) {
+            val v = b.toInt() and 0xff
+            if (v < 16) sb.append('0')
+            sb.append(v.toString(16))
         }
-        return Date(f.lastModified())
+        return sb.toString()
     }
 }

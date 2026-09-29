@@ -5,7 +5,7 @@
 WhatsApp Media Suite is a single integrated desktop application (GUI + CLI) that
 intelligently merges the best features of five open-source WhatsApp tools —
 organizing, deduplicating, date-repairing, cleaning and live-watching your
-media, without duplicate features and without touching your account.
+media, without duplicate features and without touching your account. The Android app supports **both WhatsApp and WhatsApp Business**.
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -26,7 +26,8 @@ media, without duplicate features and without touching your account.
 | **Clean** | Tick categories and delete files by category and/or age (older-than-N-days), with dry-run preview first | *WhatsAppCleaner* / *WhatsApp-Cleaner* |
 | **Organize** | Sort the whole media folder into `Contact or Group / Category /` folders using your decrypted `msgstore.db` + contacts (`wa.db` or `contacts.vcf`); or organize by `YYYY-MM / Category` with no database at all; copy or move, dry-run first | *wa-sort-media* + *whatskeep* (both organizers unified into one engine) |
 | **Duplicates** | Fast three-stage duplicate finder (size → first-chunk hash → full hash), keeps the shortest filename, preview then delete | *whatsapp-media-tools* (`find-duplicates.py`) |
-| **Dates** | Restore the capture date WhatsApp strips from photos: EXIF `DateTimeOriginal` for images, created/modified 
+| **Dates** | Restore the capture date WhatsApp strips from photos: EXIF `DateTimeOrigi
+nal` for images, created/modified 
 stamps for images + videos, straight from the filename | *whatsapp-media-tools* (`restore-exif.py`) |
 | **Status** | Copy `.Statuses` (24-hour disappearing statuses) into permanent `YYYY-MM-DD` folders before they expire | *WhatsApp-Cleaner* (status saver) |
 | **Watcher** | Watch a folder (e.g. Downloads) and instantly file any incoming WhatsApp media into `YYYY-MM / Category /` — content-fingerprinted so nothing is processed twice | *whatskeep* (real-time monitoring) |
@@ -38,12 +39,12 @@ duplicate detection is shared by both the Cleaner and the Duplicates tab.
 
 ## Downloads
 
-Get both apps from the [v1.0.0 Release](../../releases):
+Get both apps from the [v2.0.0 Release](../../releases):
 
 - **`WhatsAppMediaSuite.exe`** - the Windows desktop app (GUI + CLI), no
   Python needed. Windows SmartScreen may warn on first launch (unsigned
   binary) - choose *More info -> Run anyway*.
-- **`WhatsAppMediaSuite.apk`** - the Android app (see below).
+- **`WhatsAppMediaSuite.apk`** - the Android app v2.0.0 with the new professional UI (see below).
 
 Every push to `main` rebuilds both automatically and re-uploads them to the
 Release; builds are also kept as artifacts in the
@@ -78,7 +79,8 @@ python -m wmsuite scan PATH   # CLI (see below)
 wmsuite scan <whatsapp-folder>                       # size report per category
 wmsuite clean <folder> --empty-dirs --prune-backups 3 --dry-run
 wmsuite organize <Media-folder> [--mode contact|date|type]
-                 [--msgstore msgstore.db] [--contacts contacts.vcf]
+                 [--msgstore msgstore.db] [--contacts contacts.v
+cf]
                  [--move] [--dry-run]
 wmsuite duplicates <folder> -r [--delete | --dry-run]
 wmsuite exif <folder> -r [--force]
@@ -116,27 +118,16 @@ of WhatsApp media (including your Downloads folder).
 
 ## Android app
 
-The repo also ships a native Android app (in `android/`) that puts the
-cleaning and organizing power of the desktop suite directly on your phone -
-the successor of the two Android cleaner apps merged into this project:
+The repo ships a native Android app (in `android/`) with a professional, guided interface - the successor of the two Android cleaner apps merged into this project. It detects **both WhatsApp and WhatsApp Business** automatically (`Android/media/com.whatsapp`, `Android/media/com.whatsapp.w4b` and the legacy `/sdcard` locations), shows which profile is active, and preselects the most recently used one - so scanning always finds your media.
 
-- **Scan** the WhatsApp folder (both `/sdcard/WhatsApp` and the newer
-  `/sdcard/Android/media/com.whatsapp/WhatsApp`) and show every category
-  with file counts and sizes.
-- **Clean by category** (with confirmation), **clean media older than 30
-  days**, **prune old msgstore backups** (keeps the 5 newest), **remove
-  empty folders**, **save statuses** to `/sdcard/SavedStatuses`,
-  **find & delete duplicates** (size + SHA-256), and **organize by date**
-  into `/sdcard/WMSuite-Organized/YYYY-MM/Category/`.
+- **Dashboard** - guided setup: storage permission, profile picker (WhatsApp vs WhatsApp Business with file counts, sizes and last-activity badges), storage scan with per-category cards showing a **sent vs received** split.
+- **Clean** - clean any category with an *All / Received / Sent* choice and confirmation, clean media older than N days (adjustable stepper), prune old msgstore backups (keep 5 newest), remove empty folders.
+- **Tools** - duplicate finder (size + SHA-256) that **always keeps the earliest original** of each group; **EXIF date repair** that reads the timestamp from the filename and writes it back into the photo EXIF so the gallery shows photos on the right days; status saver; organize-by-date.
+- **Chats** - guided **per-contact organizing**: export chats with media from WhatsApp or WhatsApp Business, and the app copies their attachments into `WMSuite-Organized/Conversations/<Contact>/`. (The chat database is end-to-end encrypted, so chat exports are the safe way to link media to a contact without root - your chat and the exported ZIP are never modified.)
 - A global **dry-run** toggle previews every destructive action first.
-- `Databases` and `Backups` are never offered as cleanable categories -
-  your chat history stays safe.
+- `Databases` and `Backups` are never offered as cleanable categories - your chat history stays safe.
 
-Install: download `WhatsAppMediaSuite.apk` from the
-[v1.0.0 Release](../../releases), allow "install unknown apps" for your
-browser/file manager when prompted, and install. On first launch tap
-**Grant storage permission** and allow *All files access*. The app is 100%
-offline and never uploads anything.
+Install: download `WhatsAppMediaSuite.apk` from the [v2.0.0 Release](../../releases), allow "install unknown apps" for your browser or file manager when prompted, and install. On first launch tap **Grant storage access** on the Dashboard and allow *All files access*. The app is 100% offline and never uploads anything.
 
 ### CLI on Android (Termux)
 
@@ -156,6 +147,7 @@ python -m wmsuite clean /sdcard/WhatsApp/Media --days 30 --dry-run
 - Every destructive operation has a **dry-run** (preview) mode, and dry run
   is ON by default in the GUI.
 - Contact organizing **copies** by default; originals stay untouched.
+- Duplicate removal on Android **always keeps the earliest original** of every group.
 - Nothing is ever uploaded anywhere — the app is 100% offline.
 - It only reads files you point it at and never connects to WhatsApp.
 
@@ -179,7 +171,8 @@ es.py    3-stage duplicate finder
 
 ## License & credits
 
-GPL-3.0. This project merges and reimplements code and ideas from:
+GPL-3.0. This pro
+ject merges and reimplements code and ideas from:
 
 - [wa-sort-media](https://github.com/chances190/wa-sort-media) (GPL-3.0) —
   msgstore→chat mapping, wa.db/vcf contacts, organize-by-conversation
