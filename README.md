@@ -1,6 +1,6 @@
 # WhatsApp Media Suite
 
-**One Windows app for everything WhatsApp does to your media.**
+**One suite for everything WhatsApp does to your media - Windows desktop, Android app, and CLI.**
 
 WhatsApp Media Suite is a single integrated desktop application (GUI + CLI) that
 intelligently merges the best features of five open-source WhatsApp tools —
@@ -26,7 +26,8 @@ media, without duplicate features and without touching your account.
 | **Clean** | Tick categories and delete files by category and/or age (older-than-N-days), with dry-run preview first | *WhatsAppCleaner* / *WhatsApp-Cleaner* |
 | **Organize** | Sort the whole media folder into `Contact or Group / Category /` folders using your decrypted `msgstore.db` + contacts (`wa.db` or `contacts.vcf`); or organize by `YYYY-MM / Category` with no database at all; copy or move, dry-run first | *wa-sort-media* + *whatskeep* (both organizers unified into one engine) |
 | **Duplicates** | Fast three-stage duplicate finder (size → first-chunk hash → full hash), keeps the shortest filename, preview then delete | *whatsapp-media-tools* (`find-duplicates.py`) |
-| **Dates** | Restore the capture date WhatsApp strips from photos: EXIF `DateTimeOriginal` for images, created/modified stamps for images + videos, straight from the filename | *whatsapp-media-tools* (`restore-exif.py`) |
+| **Dates** | Restore the capture date WhatsApp strips from photos: EXIF `DateTimeOriginal` for images, created/modified 
+stamps for images + videos, straight from the filename | *whatsapp-media-tools* (`restore-exif.py`) |
 | **Status** | Copy `.Statuses` (24-hour disappearing statuses) into permanent `YYYY-MM-DD` folders before they expire | *WhatsApp-Cleaner* (status saver) |
 | **Watcher** | Watch a folder (e.g. Downloads) and instantly file any incoming WhatsApp media into `YYYY-MM / Category /` — content-fingerprinted so nothing is processed twice | *whatskeep* (real-time monitoring) |
 
@@ -35,17 +36,21 @@ Smart de-duplication of features: the two "organize by contact" engines
 cleaners' overlapping features (scan, clean, status) are one Cleaner; and
 duplicate detection is shared by both the Cleaner and the Duplicates tab.
 
-## Getting the .exe
+## Downloads
 
-**Option A — download the build (recommended).**
-Go to the [Actions tab](../../actions), open the latest **Build Windows EXE**
-run, and download the `WhatsAppMediaSuite-windows` artifact from the run page.
-Unzip and run `WhatsAppMediaSuite.exe` — no Python needed.
+Get both apps from the [v1.0.0 Release](../../releases):
 
-Every push to `main` rebuilds it automatically, and pushing a `v*` tag
-publishes it to [Releases](../../releases).
+- **`WhatsAppMediaSuite.exe`** - the Windows desktop app (GUI + CLI), no
+  Python needed. Windows SmartScreen may warn on first launch (unsigned
+  binary) - choose *More info -> Run anyway*.
+- **`WhatsAppMediaSuite.apk`** - the Android app (see below).
 
-**Option B — build it yourself.**
+Every push to `main` rebuilds both automatically and re-uploads them to the
+Release; builds are also kept as artifacts in the
+[Actions tab](../../actions) (`WhatsAppMediaSuite-windows` and
+`WhatsAppMediaSuite-android`).
+
+**Building the .exe yourself:**
 
 ```bat
 pip install -r requirements.txt pyinstaller
@@ -57,6 +62,7 @@ Or directly:
 ```bat
 pyinstaller --noconfirm --onefile --windowed --name WhatsAppMediaSuite wmsuite_launch.py
 ```
+
 
 ## Running from source
 
@@ -76,7 +82,8 @@ wmsuite organize <Media-folder> [--mode contact|date|type]
                  [--move] [--dry-run]
 wmsuite duplicates <folder> -r [--delete | --dry-run]
 wmsuite exif <folder> -r [--force]
-wmsuite status <Media/.Statuses> <save-folder> [--move]
+wmsuite status <Media/.Statuses> <save-folder> 
+[--move]
 wmsuite watch <Downloads> <target-folder> [--interval 5] [--copy]
 ```
 
@@ -107,6 +114,43 @@ media file to the chat that received it, so the Organizer can build
 `date` and `type` modes need no database at all — point them at any folder
 of WhatsApp media (including your Downloads folder).
 
+## Android app
+
+The repo also ships a native Android app (in `android/`) that puts the
+cleaning and organizing power of the desktop suite directly on your phone -
+the successor of the two Android cleaner apps merged into this project:
+
+- **Scan** the WhatsApp folder (both `/sdcard/WhatsApp` and the newer
+  `/sdcard/Android/media/com.whatsapp/WhatsApp`) and show every category
+  with file counts and sizes.
+- **Clean by category** (with confirmation), **clean media older than 30
+  days**, **prune old msgstore backups** (keeps the 5 newest), **remove
+  empty folders**, **save statuses** to `/sdcard/SavedStatuses`,
+  **find & delete duplicates** (size + SHA-256), and **organize by date**
+  into `/sdcard/WMSuite-Organized/YYYY-MM/Category/`.
+- A global **dry-run** toggle previews every destructive action first.
+- `Databases` and `Backups` are never offered as cleanable categories -
+  your chat history stays safe.
+
+Install: download `WhatsAppMediaSuite.apk` from the
+[v1.0.0 Release](../../releases), allow "install unknown apps" for your
+browser/file manager when prompted, and install. On first launch tap
+**Grant storage permission** and allow *All files access*. The app is 100%
+offline and never uploads anything.
+
+### CLI on Android (Termux)
+
+Power users can run the exact same Python suite on the phone:
+
+```bash
+pkg install python git
+termux-setup-storage
+git clone https://github.com/inshalstratrum/whatsapp-media-suite
+cd whatsapp-media-suite
+python -m wmsuite scan /sdcard/WhatsApp
+python -m wmsuite clean /sdcard/WhatsApp/Media --days 30 --dry-run
+```
+
 ## Safety
 
 - Every destructive operation has a **dry-run** (preview) mode, and dry run
@@ -125,7 +169,8 @@ wmsuite/
 ├── organizer.py     unified organize engine (contact / date / type)
 ├── db.py            msgstore.db → chat mapping (modern + legacy schema)
 ├── contacts.py      wa.db + vCard contact loading
-├── duplicates.py    3-stage duplicate finder
+├── duplicat
+es.py    3-stage duplicate finder
 ├── exif_restore.py  EXIF / timestamp restoration
 ├── scanner.py       storage scan & cleaner
 ├── status_saver.py  status saver

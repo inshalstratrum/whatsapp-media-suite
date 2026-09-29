@@ -120,8 +120,10 @@ class ScannerTests(unittest.TestCase):
             empty = tmp / "Media" / "WhatsApp Stickers"
             empty.mkdir()
             removed = remove_empty_dirs(tmp)
-            # Both the empty "Stickers" folder and the now-empty "Media" folder go.
-            self.assertEqual(len(removed), 2)
+            # Only the empty Stickers folder can go: Media still holds the
+            # image file, and the tmp root itself is never removed.
+            self.assertEqual(len(removed), 1)
+            self.assertTrue(str(removed[0]).endswith("WhatsApp Stickers"))
 
 
 class StatusSaverTests(unittest.TestCase):

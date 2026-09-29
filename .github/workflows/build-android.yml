@@ -1,0 +1,61 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: "8.7"
+
+      - name: Build debug APK
+        run: |
+          cd android
+          gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee ../ci-apk.log
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WhatsAppMediaSuite-android
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Publish APK to GitHub Release (main builds)
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v1.0.0 "android/app/build/outputs/apk/debug/app-debug.apk#WhatsAppMediaSuite.apk" --repo "$GITHUB_REPOSITORY" --title "WhatsApp Media Suite v1.0.0" --notes "All-in-one WhatsApp media manager. Download WhatsAppMediaSuite.exe for Windows and WhatsAppMediaSuite.apk for Android. 100% offline, dry-run by default." || gh release upload v1.0.0 "android/app/build/outputs/apk/debug/app-debug.apk#WhatsAppMediaSuite.apk" --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Report failure as issue
+        if: failure() && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "Android APK build failed."
+            echo ""
+            echo "Run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "Commit: $GITHUB_SHA"
+            echo ""
+            echo "Build log (last 400 lines):"
+            echo ""
+            tail -n 400 ci-apk.log || true
+          } > issue-body.txt
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "Android APK build failed (run $GITHUB_RUN_ID)" --body-file issue-body.txt
