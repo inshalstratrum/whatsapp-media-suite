@@ -41,7 +41,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v1.0.0 "android/app/build/outputs/apk/debug/app-debug.apk#WhatsAppMediaSuite.apk" --repo "$GITHUB_REPOSITORY" --title "WhatsApp Media Suite v1.0.0" --notes "All-in-one WhatsApp media manager. Download WhatsAppMediaSuite.exe for Windows and WhatsAppMediaSuite.apk for Android. 100% offline, dry-run by default." || gh release upload v1.0.0 "android/app/build/outputs/apk/debug/app-debug.apk#WhatsAppMediaSuite.apk" --clobber --repo "$GITHUB_REPOSITORY"
+          cp android/app/build/outputs/apk/debug/app-debug.apk WhatsAppMediaSuite.apk
+          gh release delete-asset v1.0.0 app-debug.apk -y || true
+          gh release create v1.0.0 "WhatsAppMediaSuite.apk" --repo "$GITHUB_REPOSITORY" --title "WhatsApp Media Suite v1.0.0" --notes "All-in-one WhatsApp media manager. Download WhatsAppMediaSuite.exe for Windows and WhatsAppMediaSuite.apk for Android. 100% offline, dry-run by default." || gh release upload v1.0.0 "WhatsAppMediaSuite.apk" --clobber --repo "$GITHUB_REPOSITORY"
 
       - name: Report failure as issue
         if: failure() && github.event_name == 'push'
