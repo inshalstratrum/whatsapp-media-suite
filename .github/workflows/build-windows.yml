@@ -59,17 +59,28 @@ jobs:
           git commit -m "ci: record successful exe build [skip ci]"
           git push
 
-      - name: Report failure as issue
-        if: failure() && github.event_name == 'push'
+  report-failure:
+    needs: build
+    if: failure() && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: File issue with failed-step logs
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          SHA: ${{ github.sha }}
         run: |
-          "Windows build workflow failed." | Out-File -FilePath issue-body.txt -Encoding utf8
-          "" | Add-Content -Path issue-body.txt
-          "Run: https://github.com/$env:REPO/actions/runs/$env:GITHUB_RUN_ID" | Add-Content -Path issue-body.txt
-          "Commit: $env:GITHUB_SHA" | Add-Content -Path issue-body.txt
-          "" | Add-Content -Path issue-body.txt
-          "Failed-step logs:" | Add-Content -Path issue-body.txt
-          gh run view $env:GITHUB_RUN_ID --repo $env:REPO --log-failed | Add-Content -Path issue-body.txt
-          gh issue create --repo $env:REPO --title "Windows build failed (run $env:GITHUB_RUN_ID)" --body-file issue-body.txt
+          JOB_ID=$(gh run view "$RUN_ID" --repo "$REPO" --json jobs --jq '.jobs[] | select(.name=="build") | .databaseId')
+          gh run view --repo "$REPO" --job "$JOB_ID" --log-failed > failed-logs.txt || true
+          {
+            echo "Windows build workflow failed."
+            echo ""
+            echo "Run: https://github.com/$REPO/actions/runs/$RUN_ID"
+            echo "Commit: $SHA"
+            echo ""
+            echo "Failed-step logs:"
+            echo ""
+            cat failed-logs.txt
+          } > issue-body.txt
+          gh issue create --repo "$REPO" --title "Windows build failed (run $RUN_ID)" --body-file issue-body.txt
