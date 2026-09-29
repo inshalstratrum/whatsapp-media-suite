@@ -12,6 +12,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
@@ -321,7 +322,7 @@ class MainActivity : Activity() {
 
         val profCard = card()
         tv(profCard, "2. Choose your WhatsApp", 15f, COL_TEXT, true)
-        tv(profCard, "WhatsApp and WhatsApp Business are detected automatically. The active one (used in the last 30 days) is preselected - pick the other one if your media lives there.", 13f, COL_SUB)
+        tv(profCard, "WhatsApp and WhatsApp Business are detected automatically. If your folders are not found, tap 'Search entire storage' - or point the app at any folder yourself with 'Choose media folder manually'.", 13f, COL_SUB)
         val profRow = LinearLayout(this)
         profRow.orientation = LinearLayout.HORIZONTAL
         profRow.gravity = Gravity.CENTER_VERTICAL
@@ -344,6 +345,8 @@ class MainActivity : Activity() {
         profileContainer = LinearLayout(this)
         profileContainer.orientation = LinearLayout.VERTICAL
         profCard.addView(profileContainer)
+        addBtn(profCard, "Search entire storage for media folders", COL_TEAL) { deepSearchNow() }
+        addBtn(profCard, "Choose media folder manually", COL_DARK) { pickFolder() }
         inner.addView(profCard)
 
         val scanCard = card()
@@ -479,6 +482,11 @@ class MainActivity : Activity() {
         return scroll
     }
 
+    private fun customRootPath(): String? {
+        val path = getSharedPreferences("wmsuite", MODE_PRIVATE).getString("customRoot", null) ?: return null
+        return if (File(path).isDirectory) path else null
+    }
+
     private fun refreshProfiles(announce: Boolean) {
         if (!hasStorageAccess()) {
             profiles = emptyList()
@@ -489,14 +497,19 @@ class MainActivity : Activity() {
         status("Looking for WhatsApp profiles...")
         Thread {
             try {
-                val list = Profiles.detect(Environment.getExternalStorageDirectory())
+                var list = Profiles.detect(Environment.getExternalStorageDirectory())
+                list = Profiles.withCustom(list, customRootPath())
                 runOnUiThread {
                     profiles = list
                     if (selected == null || !list.contains(selected)) selected = list.firstOrNull()
                     renderProfiles()
                     if (announce) {
-                        if (list.isEmpty()) toast("No WhatsApp or WhatsApp Business storage found.")
-                        else log("Found " + list.size + " profile(s). The most active one is preselected.")
+                        if (list.isEmpty()) {
+                            toast("No WhatsApp storage found - use Search or pick the folder manually.")
+                            log("No WhatsApp storage found. Use 'Search entire storage' or 'Choose media folder manually' below.")
+                        } else {
+                            log("Found " + list.size + " profile(s). The most active one is preselected.")
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -512,7 +525,7 @@ class MainActivity : Activity() {
         profileContainer.removeAllViews()
         if (profiles.isEmpty()) {
             val t = TextView(this)
-            t.text = "No WhatsApp or WhatsApp Business storage found yet. Grant storage access (above), then tap Refresh."
+            t.text = "No WhatsApp storage found yet. Grant storage access (above), then tap 'Search entire storage' or 'Choose media folder manually'."
             t.textSize = 13f
             t.setTextColor(COL_SUB)
             profileContainer.addView(t)
@@ -558,9 +571,14 @@ class MainActivity : Activity() {
             info.textSize = 12f
             info.setTextColor(COL_SUB)
             row.addView(info)
+            val path = TextView(this)
+            path.text = p.root.absolutePath
+            path.textSize = 10f
+            path.setTextColor(COL_SUB)
+            row.addView(path)
             row.setOnClickListener {
                 selected = p
-                log("Selected profile: " + p.name)
+                log("Selected profile: " + p.name + " [" + p.root.absolutePath + "]")
                 scanSummary.text = "Not scanned yet."
                 catContainer.removeAllViews()
                 renderProfiles()
@@ -569,6 +587,100 @@ class MainActivity : Activity() {
             rlp.topMargin = dp(6)
             row.layoutParams = rlp
             profileContainer.addView(row)
+        }
+    }
+
+    private fun deepSearchNow() {
+        if (!hasStorageAccess()) { toast("Grant storage permission first."); return }
+        if (!busy.compareAndSet(false, true)) { toast("Another task is running, please wait."); return }
+        status("Searching your storage for WhatsApp media folders...")
+        Thread {
+            try {
+                val found = Profiles.deepSearch(Environment.getExternalStorageDirectory()) { msg -> log(msg) }
+                runOnUiThread {
+                    profiles = found
+                    selected = found.firstOrNull()
+                    renderProfiles()
+                    scanSummary.text = "Not scanned yet."
+                    catContainer.removeAllViews()
+                }
+                if (found.isEmpty()) {
+                    log("Deep search: no WhatsApp media folders found anywhere. Use 'Choose media folder manually'.")
+                    toast("No WhatsApp media folders found. Pick the folder manually.")
+                } else {
+                    log("Deep search found " + found.size + " folder(s). The most active one is selected - tap 'Scan storage'.")
+                }
+            } catch (e: Exception) {
+                log("Deep search error: " + e.message)
+            } finally {
+                busy.set(false)
+                status("Ready")
+            }
+        }.start()
+    }
+
+    private fun pickFolder() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+        try {
+            startActivityForResult(intent, 7001)
+        } catch (e: Exception) {
+            toast("No folder picker available on this device.")
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != 7001 || resultCode != RESULT_OK || data == null) return
+        val uri = data.data ?: return
+        val dir = treeUriToPath(uri)
+        if (dir == null || !dir.isDirectory) {
+            toast("Could not read that location. Pick a folder on your device storage (not a cloud or recent folder).")
+            return
+        }
+        if (dir.absolutePath == Environment.getExternalStorageDirectory().absolutePath) {
+            toast("Please pick the specific WhatsApp or media folder, not the whole storage.")
+            return
+        }
+        getSharedPreferences("wmsuite", MODE_PRIVATE).edit().putString("customRoot", dir.absolutePath).apply()
+        if (!busy.compareAndSet(false, true)) {
+            toast("Folder saved. It will appear in the profile list shortly.")
+            return
+        }
+        status("Reading chosen folder...")
+        Thread {
+            try {
+                val prof = Profiles.profileFrom("Chosen folder", dir)
+                runOnUiThread {
+                    if (prof == null) {
+                        toast("That folder is empty or unreadable.")
+                    } else {
+                        profiles = Profiles.withCustom(profiles, dir.absolutePath)
+                        selected = prof
+                        renderProfiles()
+                        scanSummary.text = "Not scanned yet."
+                        catContainer.removeAllViews()
+                        log("Using folder: " + dir.absolutePath)
+                    }
+                }
+            } catch (e: Exception) {
+                log("Folder pick error: " + e.message)
+            } finally {
+                busy.set(false)
+                status("Ready")
+            }
+        }.start()
+    }
+
+    private fun treeUriToPath(uri: Uri): File? {
+        return try {
+            if (uri.authority != "com.android.externalstorage.documents") return null
+            val docId = DocumentsContract.getTreeDocumentId(uri)
+            val parts = docId.split(":")
+            if (parts.size < 2 || parts[1].isEmpty()) return null
+            if (parts[0] == "primary") File(Environment.getExternalStorageDirectory(), parts[1])
+            else File("/storage/" + parts[0] + "/" + parts[1])
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -636,7 +748,7 @@ class MainActivity : Activity() {
                     scanSummary.text = cats.size.toString() + " categories - " + files + " files - " + Cleaner.humanSize(bytes)
                 }
                 if (cats.isEmpty()) {
-                    log("Scan: 0 categories. Your media may be in the other profile - check the profile list above.")
+                    log("Scan: 0 categories in " + p.root.absolutePath + ". Tap 'Search entire storage' or 'Choose media folder manually' on the Dashboard.")
                 } else {
                     log("Scan finished: " + cats.size + " categories, " + files + " files, " + Cleaner.humanSize(bytes) + " total.")
                 }
@@ -784,13 +896,15 @@ class MainActivity : Activity() {
         Thread {
             try {
                 val res = Cleaner.deleteDuplicateGroups(dupGroups, isDry())
-                log("Duplicates removed: " + res.count + " files, " + Cleaner.humanSize(res.bytes) + " freed" + (if (isDry()) " [dry run - nothing deleted]" else ""))
+                log("Duplicates: " + res.count + " extra copies, " + Cleaner.humanSize(res.bytes) + (if (isDry()) " [dry run - nothing deleted]" else " [done - the earliest original of each group was kept]"))
             } catch (e: Exception) {
-                log("Duplicates delete error: " + e.message)
+                log("Duplicate removal error: " + e.message)
             } finally {
                 busy.set(false)
                 status("Ready")
             }
+            val p = selected
+            if (p != null && busy.compareAndSet(false, true)) doScan(p)
         }.start()
     }
 
@@ -799,18 +913,18 @@ class MainActivity : Activity() {
         val p = selected
         if (p == null) { toast("No WhatsApp profile selected - wait for the profile list to load."); return }
         if (!busy.compareAndSet(false, true)) { toast("Another task is running, please wait."); return }
-        status("Scanning photo dates...")
+        status("Scanning photos for missing dates...")
         Thread {
             try {
                 exifItems = ExifRepair.scan(p.root)
                 if (exifItems.isEmpty()) {
-                    log("EXIF repair: all photos already have correct dates.")
+                    log("EXIF repair: no photos need fixing.")
                     toast("No photos need EXIF repair.")
                 } else {
                     runOnUiThread {
                         AlertDialog.Builder(this)
                             .setTitle("Photos needing date repair")
-                            .setMessage(exifItems.size.toString() + " photos have a missing or wrong capture date. Repair writes the filename timestamp into the photo EXIF and file date. The image itself is not changed.")
+                            .setMessage(exifItems.size.toString() + " photos are missing the capture date in the file. Apply the repair now?")
                             .setPositiveButton(if (isDry()) "Preview repair" else "Repair now") { _, _ -> doExifApply() }
                             .setNegativeButton("Cancel", null)
                             .show()
@@ -831,7 +945,7 @@ class MainActivity : Activity() {
         Thread {
             try {
                 val n = ExifRepair.apply(exifItems, isDry())
-                log("EXIF repair: " + n + " photos updated" + (if (isDry()) " [dry run]" else ""))
+                log("EXIF repair: " + n + " photos updated" + (if (isDry()) " [dry run - nothing written]" else " - your gallery should now show them on the right days."))
             } catch (e: Exception) {
                 log("EXIF repair error: " + e.message)
             } finally {
@@ -842,84 +956,103 @@ class MainActivity : Activity() {
     }
 
     private fun runSaveStatuses() {
-        runTask("Saving statuses") { p ->
-            val src = File(File(p.root, "Media"), ".Statuses")
-            val target = File(Environment.getExternalStorageDirectory(), "SavedStatuses")
-            if (!src.isDirectory) {
-                "No .Statuses folder at " + src.path + " (statuses may have already expired)."
-            } else {
+        confirmGo(
+            "Save statuses",
+            if (isDry()) "Dry run: nothing will be copied, you will only see what would be saved."
+            else "Copy the current 24-hour statuses into permanent dated folders? Originals stay untouched."
+        ) {
+            runTask("Saving statuses") { p ->
+                val src = File(p.root, ".Statuses")
+                val target = File(Environment.getExternalStorageDirectory(), "WMSuite-Saved")
                 val res = Cleaner.saveStatuses(src, target, isDry())
-                "Statuses saved: " + res.count + " files, " + Cleaner.humanSize(res.bytes) + (if (isDry()) " [dry run]" else " -> " + target.path)
+                "Statuses saved: " + res.count + " files, " + Cleaner.humanSize(res.bytes) + " into " + target.name + suffix()
             }
         }
     }
 
     private fun runOrganize() {
-        runTask("Organizing by date") { p ->
-            val out = File(Environment.getExternalStorageDirectory(), "WMSuite-Organized")
-            val res = Cleaner.organizeByDate(p.root, out, isDry())
-            "Organized: " + res.count + " files, " + Cleaner.humanSize(res.bytes) + (if (isDry()) " [dry run]" else " -> " + out.path)
+        confirmGo(
+            "Organize by date",
+            if (isDry()) "Dry run: nothing will be copied, you will only see what would be organized."
+            else "Copy media into WMSuite-Organized/YYYY-MM/Category folders? Originals stay untouched."
+        ) {
+            runTask("Organizing by date") { p ->
+                val out = File(Environment.getExternalStorageDirectory(), "WMSuite-Organized")
+                val res = Cleaner.organizeByDate(p.root, out, isDry())
+                "Organized: " + res.count + " files, " + Cleaner.humanSize(res.bytes) + " copied to " + out.name + suffix()
+            }
         }
     }
 
     private fun findExports() {
         if (!hasStorageAccess()) { toast("Grant storage permission first."); return }
-        val name = exportFolderInput.text.toString().trim()
-        val folder = if (name.startsWith("/")) File(name) else File(Environment.getExternalStorageDirectory(), name)
-        val exports = ChatExportOrganizer.findExports(folder)
-        exportsContainer.removeAllViews()
-        if (exports.isEmpty()) {
-            val t = TextView(this)
-            t.text = "No chat exports found in " + folder.path + ". Export a chat with media from WhatsApp first (steps above)."
-            t.textSize = 12f
-            t.setTextColor(COL_SUB)
-            exportsContainer.addView(t)
-            log("Chat exports: none found in " + folder.path)
-            return
-        }
-        for (e in exports) exportsContainer.addView(exportRow(e))
-        log("Chat exports found: " + exports.size + " in " + folder.path)
+        if (!busy.compareAndSet(false, true)) { toast("Another task is running, please wait."); return }
+        status("Looking for chat exports...")
+        Thread {
+            try {
+                val folderName = exportFolderInput.text.toString().trim()
+                if (folderName.isEmpty()) {
+                    toast("Enter the folder with your exported chats (e.g. Download).")
+                    return@Thread
+                }
+                val folder = File(Environment.getExternalStorageDirectory(), folderName)
+                val exports = ChatExportOrganizer.findExports(folder)
+                runOnUiThread {
+                    exportsContainer.removeAllViews()
+                    if (exports.isEmpty()) {
+                        val t = TextView(this)
+                        t.text = "No chat exports found in " + folderName + ". Export chats with media from WhatsApp first (see the steps above)."
+                        t.textSize = 13f
+                        t.setTextColor(COL_SUB)
+                        exportsContainer.addView(t)
+                    } else {
+                        for (e in exports) exportsContainer.addView(exportRow(e))
+                    }
+                }
+                log("Chat exports found: " + exports.size + " in " + folder.absolutePath)
+            } catch (e: Exception) {
+                log("Chat export search error: " + e.message)
+            } finally {
+                busy.set(false)
+                status("Ready")
+            }
+        }.start()
     }
 
     private fun exportRow(e: ChatExportOrganizer.Export): View {
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
         row.gravity = Gravity.CENTER_VERTICAL
-        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        lp.topMargin = dp(8)
-        row.layoutParams = lp
-        val info = TextView(this)
-        info.text = e.contact + "\n" + e.zip.name + " (" + Cleaner.humanSize(e.zip.length()) + ")"
-        info.textSize = 13f
-        info.setTextColor(COL_TEXT)
-        info.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        row.addView(info)
-        val imp = Button(this)
-        imp.text = "Import"
-        imp.textSize = 12f
-        imp.isAllCaps = false
-        imp.setTextColor(Color.WHITE)
-        imp.backgroundTintList = ColorStateList.valueOf(COL_GREEN)
-        imp.setOnClickListener { importExport(e) }
-        row.addView(imp)
+        row.setPadding(dp(12), dp(10), dp(12), dp(10))
+        row.background = roundedBg(0xFFFAFAFA.toInt(), dp(10), 0xFFEEEEEE.toInt())
+        val label = TextView(this)
+        label.text = e.contact
+        label.textSize = 14f
+        label.setTextColor(COL_TEXT)
+        label.setTypeface(null, Typeface.BOLD)
+        label.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        row.addView(label)
+        val btn = Button(this)
+        btn.text = "Organize"
+        btn.textSize = 12f
+        btn.isAllCaps = false
+        btn.setTextColor(Color.WHITE)
+        btn.backgroundTintList = ColorStateList.valueOf(COL_GREEN)
+        btn.setOnClickListener { runImportExport(e) }
+        row.addView(btn)
         return row
     }
 
-    private fun importExport(e: ChatExportOrganizer.Export) {
-        if (!hasStorageAccess()) { toast("Grant storage permission first."); return }
+    private fun runImportExport(e: ChatExportOrganizer.Export) {
         if (!busy.compareAndSet(false, true)) { toast("Another task is running, please wait."); return }
-        status("Importing chat with " + e.contact + "...")
+        status("Organizing " + e.contact + "...")
         Thread {
             try {
                 val out = File(Environment.getExternalStorageDirectory(), "WMSuite-Organized")
                 val res = ChatExportOrganizer.importExport(e.zip, out, isDry())
-                if (res.count == 0) {
-                    log("Chat import (" + e.contact + "): no media found in the export.")
-                } else {
-                    log("Chat import (" + e.contact + "): " + res.count + " files, " + Cleaner.humanSize(res.bytes) + (if (isDry()) " [dry run]" else " -> WMSuite-Organized/Conversations/" + e.contact))
-                }
+                log("Organized " + e.contact + ": " + res.count + " files, " + Cleaner.humanSize(res.bytes) + (if (isDry()) " [dry run - nothing copied]" else " copied to WMSuite-Organized/Conversations/" + e.contact + "/"))
             } catch (ex: Exception) {
-                log("Chat import error: " + ex.message)
+                log("Organize error for " + e.contact + ": " + ex.message)
             } finally {
                 busy.set(false)
                 status("Ready")

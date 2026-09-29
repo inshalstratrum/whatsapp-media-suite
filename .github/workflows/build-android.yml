@@ -43,8 +43,8 @@ jobs:
         run: |
           cp android/app/build/outputs/apk/debug/app-debug.apk WhatsAppMediaSuite.apk
           gh release delete v1.0.0 --cleanup-tag -y || true
-          gh release delete-asset v2.0.0 WhatsAppMediaSuite.apk -y || true
-          gh release create v2.0.0 "WhatsAppMediaSuite.apk" --repo "$GITHUB_REPOSITORY" --title "WhatsApp Media Suite v2.0.0" --notes "All-in-one WhatsApp and WhatsApp Business media manager for Windows and Android. Dry-run by default, 100% offline." || gh release upload v2.0.0 "WhatsAppMediaSuite.apk" --clobber --repo "$GITHUB_REPOSITORY"
+          gh release delete-asset v2.1.0 WhatsAppMediaSuite.apk -y || true
+          gh release create v2.1.0 "WhatsAppMediaSuite.apk" --repo "$GITHUB_REPOSITORY" --title "WhatsApp Media Suite v2.1.0" --notes "All-in-one WhatsApp and WhatsApp Business media manager for Windows and Android. Dry-run by default, 100% offline." || gh release upload v2.1.0 "WhatsAppMediaSuite.apk" --clobber --repo "$GITHUB_REPOSITORY"
 
       - name: Report failure as issue
         if: failure() && github.event_name == 'push'
