@@ -1,22 +1,20 @@
 package com.inshal.wmsuite
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.DocumentsContract
-import android.provider.Settings
+import android.text.InputType
 import android.view.Gravity
 import android.view.View
-import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -25,1038 +23,1068 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import java.io.File
-import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.max
 
 class MainActivity : Activity() {
 
-    private val COL_DARK = 0xFF075E54.toInt()
-    private val COL_TEAL = 0xFF128C7E.toInt()
-    private val COL_GREEN = 0xFF25D366.toInt()
-    private val COL_TEXT = 0xFF212121.toInt()
-    private val COL_SUB = 0xFF757575.toInt()
-    private val COL_CARD = 0xFFFFFFFF.toInt()
-    private val COL_RED = 0xFFD32F2F.toInt()
+    companion object {
+        private val COL_BG = 0xFF0E1116.toInt()
+        private val COL_CARD = 0xFF161B23.toInt()
+        private val COL_CARD2 = 0xFF1C222D.toInt()
+        private val COL_TEXT = 0xFFE8ECF1.toInt()
+        private val COL_SUB = 0xFF97A5B4.toInt()
+        private val COL_GREEN = 0xFF25D366.toInt()
+        private val COL_DIM = 0xFF232B37.toInt()
+        private val COL_RED = 0xFFFF8A80.toInt()
+        private val COL_WARN = 0xFFF59E0B.toInt()
+    }
 
-    private val busy = AtomicBoolean(false)
-    private var days = 30
-
-    private lateinit var dryRunCheck: CheckBox
-    private lateinit var statusLine: TextView
-    private lateinit var logView: TextView
+    private lateinit var root: FrameLayout
+    private lateinit var content: FrameLayout
+    private val pages = ArrayList<ScrollView>()
+    private val navBtns = ArrayList<TextView>()
+    private lateinit var dryBtn: TextView
+    private lateinit var logPanel: LogPanel
+    private lateinit var logChip: TextView
     private lateinit var permStatus: TextView
-    private lateinit var grantBtn: Button
-    private lateinit var profileContainer: LinearLayout
-    private lateinit var scanSummary: TextView
-    private lateinit var catContainer: LinearLayout
-    private lateinit var daysLabel: TextView
-    private lateinit var exportFolderInput: EditText
-    private lateinit var exportsContainer: LinearLayout
+    private lateinit var profilesBox: LinearLayout
+    private lateinit var cleanBox: LinearLayout
+    private lateinit var toolsBox: LinearLayout
+    private lateinit var exportsBox: LinearLayout
+    private lateinit var keyInput: EditText
+    private lateinit var useContactsCb: CheckBox
+    private lateinit var moveCb: CheckBox
+    private lateinit var mapStatus: TextView
+    private lateinit var contactListBox: LinearLayout
 
-    private var profiles: List<Profiles.WaProfile> = emptyList()
-    private var selected: Profiles.WaProfile? = null
-    private var dupGroups: List<List<File>> = emptyList()
+    private var dryRun = true
+    private var activeProfile: Profiles.WaProfile? = null
+    private var contactMap: ContactOrganizer.MapInfo? = null
+    private val scanStats = LinkedHashMap<String, Cleaner.CategoryStat>()
     private var exifItems: List<ExifRepair.Item> = emptyList()
+    private var oldDays = 90
+    private var useContacts = false
 
-    private val pages = mutableListOf<ScrollView>()
-    private val navButtons = mutableListOf<LinearLayout>()
+    private fun ext(): File = Environment.getExternalStorageDirectory()
+
+    private fun prefs() = getSharedPreferences("wmsuite", MODE_PRIVATE)
+
+    private fun customRootPath(): String? {
+        val p = prefs().getString("customRoot", null)
+        if (p != null && File(p).isDirectory) return p
+        return null
+    }
+
+    private fun keyPref(): String = prefs().getString("e2eKey", "") ?: ""
+
+    // ---------- UI helpers ----------
+
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density + 0.5f).toInt()
+
+    private fun roundedBg(color: Int, radiusDp: Int): GradientDrawable {
+        val g = GradientDrawable()
+        g.setColor(color)
+        g.cornerRadius = dp(radiusDp).toFloat()
+        return g
+    }
+
+    private fun page(): LinearLayout {
+        val p = LinearLayout(this)
+        p.orientation = LinearLayout.VERTICAL
+        p.setPadding(dp(14), dp(10), dp(14), dp(10))
+        return p
+    }
+
+    private fun card(): LinearLayout {
+        val c = LinearLayout(this)
+        c.orientation = LinearLayout.VERTICAL
+        c.background = roundedBg(COL_CARD, 12)
+        c.setPadding(dp(14), dp(14), dp(14), dp(14))
+        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        lp.bottomMargin = dp(12)
+        c.layoutParams = lp
+        return c
+    }
+
+    private fun tv(text: String, size: Float, color: Int): TextView {
+        val t = TextView(this)
+        t.text = text
+        t.textSize = size
+        t.setTextColor(color)
+        return t
+    }
+
+    private fun titleRow(text: String): TextView {
+        val t = tv(text, 15f, COL_TEXT)
+        t.typeface = Typeface.DEFAULT_BOLD
+        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        lp.bottomMargin = dp(6)
+        t.layoutParams = lp
+        return t
+    }
+
+    private fun btn(label: String, onClick: (View) -> Unit): TextView {
+        val b = TextView(this)
+        b.text = label
+        b.textSize = 13f
+        b.typeface = Typeface.DEFAULT_BOLD
+        b.setTextColor(Color.WHITE)
+        b.background = roundedBg(COL_GREEN, 18)
+        b.gravity = Gravity.CENTER
+        b.setPadding(dp(14), dp(10), dp(14), dp(10))
+        b.setOnClickListener(onClick)
+        return b
+    }
+
+    private fun btn2(label: String, onClick: (View) -> Unit): TextView {
+        val b = TextView(this)
+        b.text = label
+        b.textSize = 13f
+        b.typeface = Typeface.DEFAULT_BOLD
+        b.setTextColor(COL_TEXT)
+        b.background = roundedBg(COL_DIM, 18)
+        b.gravity = Gravity.CENTER
+        b.setPadding(dp(14), dp(10), dp(14), dp(10))
+        b.setOnClickListener(onClick)
+        return b
+    }
+
+    private fun rowH(): LinearLayout {
+        val r = LinearLayout(this)
+        r.orientation = LinearLayout.HORIZONTAL
+        return r
+    }
+
+    private fun weighted(v: View): LinearLayout.LayoutParams {
+        return LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+    }
+
+    private fun spacer(): View {
+        val s = View(this)
+        s.layoutParams = LinearLayout.LayoutParams(dp(8), 1)
+        return s
+    }
+
+    private fun toast(msg: String) {
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun log(msg: String) {
+        logPanel.append(msg)
+    }
+
+    private fun titleFor(stat: Cleaner.CategoryStat): String {
+        return stat.name + "  (" + Cleaner.humanSize(stat.bytes) + ")"
+    }
+
+    // ---------- lifecycle ----------
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        dryRun = prefs().getBoolean("dryRun", true)
 
-        val root = LinearLayout(this)
-        root.orientation = LinearLayout.VERTICAL
-        root.setBackgroundColor(0xFFF0F2F5.toInt())
+        val shell = LinearLayout(this)
+        shell.orientation = LinearLayout.VERTICAL
+        shell.setBackgroundColor(COL_BG)
+        shell.addView(buildHeader())
+        shell.addView(buildNav())
+        content = FrameLayout(this)
+        shell.addView(content, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
 
-        val header = LinearLayout(this)
-        header.orientation = LinearLayout.VERTICAL
-        header.setPadding(dp(20), dp(18), dp(20), dp(14))
-        val headerBg = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(COL_DARK, COL_TEAL))
-        header.background = headerBg
-
-        val title = TextView(this)
-        title.text = "WhatsApp Media Suite"
-        title.textSize = 22f
-        title.setTextColor(Color.WHITE)
-        title.setTypeface(null, Typeface.BOLD)
-        header.addView(title)
-
-        val subtitle = TextView(this)
-        subtitle.text = "Clean, organize and rescue your WhatsApp and WhatsApp Business media - safely."
-        subtitle.textSize = 13f
-        subtitle.setTextColor(0xFFD7EDE8.toInt())
-        header.addView(subtitle)
-
-        dryRunCheck = CheckBox(this)
-        dryRunCheck.text = "Dry run - preview only, delete nothing"
-        dryRunCheck.textSize = 13f
-        dryRunCheck.setTextColor(Color.WHITE)
-        dryRunCheck.isChecked = true
-        dryRunCheck.buttonTintList = ColorStateList.valueOf(COL_GREEN)
-        header.addView(dryRunCheck)
-
-        statusLine = TextView(this)
-        statusLine.text = "Ready"
-        statusLine.textSize = 12f
-        statusLine.setTextColor(0xFFB2DFDB.toInt())
-        header.addView(statusLine)
-        root.addView(header)
-
-        val nav = LinearLayout(this)
-        nav.orientation = LinearLayout.HORIZONTAL
-        nav.setBackgroundColor(Color.WHITE)
         val labels = arrayOf("Dashboard", "Clean", "Tools", "Chats")
         for (i in labels.indices) {
-            val item = LinearLayout(this)
-            item.orientation = LinearLayout.VERTICAL
-            item.gravity = Gravity.CENTER
-            item.setPadding(dp(4), dp(12), dp(4), dp(12))
-            val t = TextView(this)
-            t.text = labels[i]
-            t.textSize = 13f
-            t.setTypeface(null, Typeface.BOLD)
-            t.gravity = Gravity.CENTER
-            item.addView(t)
-            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            item.layoutParams = lp
-            item.setOnClickListener { selectTab(i) }
-            navButtons.add(item)
-            nav.addView(item)
+            val scroll = ScrollView(this)
+            scroll.setFillViewport(true)
+            val p = page()
+            if (i == 0) buildDashboard(p)
+            if (i == 1) buildClean(p)
+            if (i == 2) buildTools(p)
+            if (i == 3) buildChats(p)
+            scroll.addView(p)
+            scroll.layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+            scroll.visibility = View.GONE
+            content.addView(scroll)
+            pages.add(scroll)
         }
-        root.addView(nav)
 
-        val content = FrameLayout(this)
-        content.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
-        content.addView(buildDashboardPage())
-        content.addView(buildCleanPage())
-        content.addView(buildToolsPage())
-        content.addView(buildChatsPage())
-        root.addView(content)
+        root = FrameLayout(this)
+        root.addView(shell, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
 
-        val logPanel = LinearLayout(this)
-        logPanel.orientation = LinearLayout.VERTICAL
-        logPanel.setBackgroundColor(0xFF16302B.toInt())
-        logPanel.setPadding(dp(14), dp(8), dp(14), dp(10))
-        val logTitle = TextView(this)
-        logTitle.text = "ACTIVITY LOG"
-        logTitle.textSize = 11f
-        logTitle.setTextColor(0xFF80CBC4.toInt())
-        logTitle.setTypeface(null, Typeface.BOLD)
-        logPanel.addView(logTitle)
-        logView = TextView(this)
-        logView.text = "Welcome. Every action is previewed here before anything is deleted."
-        logView.textSize = 11f
-        logView.setTextColor(0xFFE0F2F1.toInt())
-        logView.setTypeface(Typeface.MONOSPACE)
-        logPanel.addView(logView)
-        root.addView(logPanel)
+        logPanel = LogPanel(this)
+        logPanel.onClosed = { logChip.visibility = View.VISIBLE }
+        root.addView(logPanel, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+
+        logChip = TextView(this)
+        logChip.text = "Activity log"
+        logChip.textSize = 12f
+        logChip.typeface = Typeface.DEFAULT_BOLD
+        logChip.setTextColor(Color.WHITE)
+        logChip.background = roundedBg(0xFF1F6FEB.toInt(), 20)
+        logChip.setPadding(dp(16), dp(10), dp(16), dp(10))
+        val chipLp = FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END)
+        chipLp.marginEnd = dp(16)
+        chipLp.bottomMargin = dp(16)
+        logChip.layoutParams = chipLp
+        logChip.visibility = View.GONE
+        logChip.setOnClickListener {
+            logChip.visibility = View.GONE
+            logPanel.showPanel()
+        }
+        root.addView(logChip)
 
         setContentView(root)
         selectTab(0)
+        refreshPermissionCard()
+        refreshProfiles()
     }
 
     override fun onResume() {
         super.onResume()
         refreshPermissionCard()
-        refreshProfiles(false)
+        if (hasStorageAccess() && profilesBox.childCount == 0) refreshProfiles()
     }
 
-    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
-
-    private fun page(): Pair<ScrollView, LinearLayout> {
-        val scroll = ScrollView(this)
-        scroll.layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
-        val inner = LinearLayout(this)
-        inner.orientation = LinearLayout.VERTICAL
-        inner.setPadding(dp(14), dp(14), dp(14), dp(24))
-        scroll.addView(inner)
-        return Pair(scroll, inner)
+    private fun buildHeader(): View {
+        val h = LinearLayout(this)
+        h.orientation = LinearLayout.VERTICAL
+        h.setPadding(dp(18), dp(14), dp(18), dp(8))
+        val title = tv("WhatsApp Media Suite", 22f, COL_TEXT)
+        title.typeface = Typeface.DEFAULT_BOLD
+        h.addView(title)
+        h.addView(tv("v2.2.0 - manage, preview and organize your media", 12f, COL_SUB))
+        return h
     }
 
-    private fun roundedBg(color: Int, radius: Int, stroke: Int): GradientDrawable {
-        val g = GradientDrawable()
-        g.setColor(color)
-        g.cornerRadius = radius.toFloat()
-        g.setStroke(dp(1), stroke)
-        return g
-    }
-
-    private fun card(): LinearLayout {
-        val l = LinearLayout(this)
-        l.orientation = LinearLayout.VERTICAL
-        l.setPadding(dp(16), dp(14), dp(16), dp(14))
-        l.background = roundedBg(COL_CARD, dp(12), 0xFFE3E6E8.toInt())
-        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        lp.setMargins(0, 0, 0, dp(12))
-        l.layoutParams = lp
-        return l
-    }
-
-    private fun tv(parent: LinearLayout, text: String, size: Float, color: Int, bold: Boolean = false): TextView {
-        val t = TextView(this)
-        t.text = text
-        t.textSize = size
-        t.setTextColor(color)
-        if (bold) t.setTypeface(null, Typeface.BOLD)
-        parent.addView(t)
-        return t
-    }
-
-    private fun addBtn(parent: LinearLayout, text: String, color: Int, body: () -> Unit): Button {
-        val b = Button(this)
-        b.text = text
-        b.isAllCaps = false
-        b.textSize = 14f
-        b.setTextColor(Color.WHITE)
-        b.backgroundTintList = ColorStateList.valueOf(color)
-        b.setOnClickListener { body() }
-        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        lp.topMargin = dp(10)
-        b.layoutParams = lp
-        parent.addView(b)
-        return b
-    }
-
-    private fun selectTab(index: Int) {
-        for (i in pages.indices) pages[i].visibility = if (i == index) View.VISIBLE else View.GONE
-        for (i in navButtons.indices) {
-            val label = navButtons[i].getChildAt(0) as TextView
-            if (i == index) {
-                navButtons[i].setBackgroundColor(0xFFE8F5E9.toInt())
-                label.setTextColor(COL_DARK)
-            } else {
-                navButtons[i].setBackgroundColor(Color.WHITE)
-                label.setTextColor(COL_SUB)
-            }
+    private fun buildNav(): View {
+        val nav = LinearLayout(this)
+        nav.orientation = LinearLayout.HORIZONTAL
+        nav.setPadding(dp(14), 0, dp(14), dp(8))
+        val labels = arrayOf("Dashboard", "Clean", "Tools", "Chats")
+        for (i in labels.indices) {
+            val b = TextView(this)
+            b.text = labels[i]
+            b.textSize = 12f
+            b.typeface = Typeface.DEFAULT_BOLD
+            b.gravity = Gravity.CENTER
+            b.setPadding(dp(4), dp(10), dp(4), dp(10))
+            b.setOnClickListener { selectTab(i) }
+            nav.addView(b, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            navBtns.add(b)
         }
-    }
-
-    private fun status(msg: String) {
-        runOnUiThread { statusLine.text = msg }
-    }
-
-    private fun toast(msg: String) {
-        runOnUiThread { Toast.makeText(this, msg, Toast.LENGTH_LONG).show() }
-    }
-
-    private fun log(msg: String) {
-        runOnUiThread {
-            if (logView.text.length > 12000) logView.text = ""
-            logView.append("- " + msg + "\n")
+        dryBtn = TextView(this)
+        dryBtn.textSize = 10f
+        dryBtn.typeface = Typeface.DEFAULT_BOLD
+        dryBtn.gravity = Gravity.CENTER
+        dryBtn.setPadding(dp(8), 0, dp(8), 0)
+        val dlp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT)
+        dlp.leftMargin = dp(6)
+        dryBtn.layoutParams = dlp
+        dryBtn.setOnClickListener {
+            dryRun = !dryRun
+            prefs().edit().putBoolean("dryRun", dryRun).apply()
+            refreshDryBtn()
+            if (dryRun) toast("Dry-run mode ON - nothing will be deleted")
+            else toast("Careful - dry-run OFF: actions now modify your files!")
         }
+        nav.addView(dryBtn)
+        refreshDryBtn()
+        return nav
     }
 
-    private fun isDry(): Boolean = dryRunCheck.isChecked
+    private fun refreshDryBtn() {
+        dryBtn.text = if (dryRun) "DRY RUN: ON" else "DRY RUN: OFF"
+        dryBtn.setTextColor(if (dryRun) COL_WARN else Color.WHITE)
+        dryBtn.background = roundedBg(if (dryRun) 0xFF2E2410.toInt() else 0xFF7A1F1F.toInt(), 14)
+    }
 
-    private fun suffix(): String = if (isDry()) " [dry run - nothing deleted]" else " [done]"
+    private fun selectTab(i: Int) {
+        for (j in pages.indices) pages[j].visibility = if (j == i) View.VISIBLE else View.GONE
+        for (j in navBtns.indices) {
+            val active = j == i
+            navBtns[j].setTextColor(if (active) COL_GREEN else COL_SUB)
+            navBtns[j].background = roundedBg(if (active) COL_CARD2 else COL_BG, 14)
+        }
+        if (i == 1) rebuildClean()
+        if (i == 2) rebuildTools()
+    }
+
+    // ---------- permissions ----------
 
     private fun hasStorageAccess(): Boolean {
-        return if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager()
-        else checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        return if (android.os.Build.VERSION.SDK_INT >= 30) {
+            Environment.isExternalStorageManager()
+        } else {
+            checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        }
     }
 
     private fun requestStorage() {
-        if (hasStorageAccess()) {
-            toast("Storage permission already granted.")
-            return
-        }
-        if (Build.VERSION.SDK_INT >= 30) {
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
             try {
-                startActivity(
-                    Intent(
-                        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                        Uri.parse("package:" + packageName)
-                    )
-                )
+                startActivity(Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:com.inshal.wmsuite")))
             } catch (e: Exception) {
-                startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                startActivity(Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
             }
         } else {
-            requestPermissions(arrayOf(android.Manifest.permission.WRITE_EXTERNAL_STORAGE), 1)
+            requestPermissions(arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE), 100)
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 100 && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            refreshPermissionCard()
+            refreshProfiles()
+        }
+        if (requestCode == 7100 && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            useContacts = true
+            loadContactMap()
         }
     }
 
     private fun refreshPermissionCard() {
-        val granted = hasStorageAccess()
-        permStatus.text = if (granted) "Granted - the app can see your WhatsApp storage." else "Not granted - the app cannot see your media yet."
-        permStatus.setTextColor(if (granted) 0xFF2E7D32.toInt() else COL_RED)
-        grantBtn.visibility = if (granted) View.GONE else View.VISIBLE
+        val ok = hasStorageAccess()
+        if (ok) {
+            permStatus.text = "Granted - full storage access."
+            permStatus.setTextColor(COL_GREEN)
+        } else {
+            permStatus.text = "Required: WhatsApp media lives in restricted folders. Allow All files access to this app."
+            permStatus.setTextColor(COL_WARN)
+        }
     }
 
-    private fun confirmGo(title: String, message: String, run: () -> Unit) {
+    // ---------- task runner ----------
+
+    private fun runTask(label: String, work: () -> Unit) {
+        log("Started: " + label)
+        toast(label)
+        Thread {
+            try {
+                work()
+                log("Done: " + label)
+            } catch (e: Exception) {
+                log("Error in " + label + ": " + (e.message ?: e.toString()))
+            }
+        }.start()
+    }
+
+    private fun confirmGo(title: String, message: String, action: () -> Unit) {
         AlertDialog.Builder(this)
             .setTitle(title)
             .setMessage(message)
-            .setPositiveButton("Go") { _, _ -> run() }
+            .setPositiveButton("Continue") { d, w -> action() }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    private fun runTask(job: String, body: (Profiles.WaProfile) -> String) {
-        if (!hasStorageAccess()) { toast("Grant storage permission first."); return }
-        val p = selected
-        if (p == null) { toast("No WhatsApp profile selected - wait for the profile list to load."); return }
-        if (!busy.compareAndSet(false, true)) { toast("Another task is running, please wait."); return }
-        status(job + "...")
-        Thread {
-            try {
-                val msg = body(p)
-                log(msg)
-            } catch (e: Exception) {
-                log(job + " error: " + e.message)
-            } finally {
-                busy.set(false)
-                status("Ready")
-            }
-        }.start()
+    private fun dryNote(): String {
+        return if (dryRun) "DRY RUN - nothing will be changed. " else "WARNING: this modifies your files permanently. "
     }
 
-    private fun buildDashboardPage(): ScrollView {
-        val (scroll, inner) = page()
-        pages.add(scroll)
+    // ---------- Dashboard ----------
 
-        val permCard = card()
-        tv(permCard, "1. Storage permission", 15f, COL_TEXT, true)
-        permStatus = tv(permCard, "Checking...", 13f, COL_SUB)
-        grantBtn = addBtn(permCard, "Grant storage access", COL_TEAL) { requestStorage() }
-        inner.addView(permCard)
+    private fun buildDashboard(p: LinearLayout) {
+        val c1 = card()
+        c1.addView(titleRow("Storage access"))
+        permStatus = tv("", 13f, COL_SUB)
+        c1.addView(permStatus)
+        c1.addView(btn("Grant access") { requestStorage() })
+        p.addView(c1)
 
-        val profCard = card()
-        tv(profCard, "2. Choose your WhatsApp", 15f, COL_TEXT, true)
-        tv(profCard, "WhatsApp and WhatsApp Business are detected automatically. If your folders are not found, tap 'Search entire storage' - or point the app at any folder yourself with 'Choose media folder manually'.", 13f, COL_SUB)
-        val profRow = LinearLayout(this)
-        profRow.orientation = LinearLayout.HORIZONTAL
-        profRow.gravity = Gravity.CENTER_VERTICAL
-        val profLabel = TextView(this)
-        profLabel.text = "Profiles on this phone"
-        profLabel.textSize = 13f
-        profLabel.setTextColor(COL_DARK)
-        profLabel.setTypeface(null, Typeface.BOLD)
-        profLabel.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        profRow.addView(profLabel)
-        val refresh = Button(this)
-        refresh.text = "Refresh"
-        refresh.textSize = 12f
-        refresh.isAllCaps = false
-        refresh.backgroundTintList = ColorStateList.valueOf(0xFFECEFF1.toInt())
-        refresh.setTextColor(COL_DARK)
-        refresh.setOnClickListener { refreshProfiles(true) }
-        profRow.addView(refresh)
-        profCard.addView(profRow)
-        profileContainer = LinearLayout(this)
-        profileContainer.orientation = LinearLayout.VERTICAL
-        profCard.addView(profileContainer)
-        addBtn(profCard, "Search entire storage for media folders", COL_TEAL) { deepSearchNow() }
-        addBtn(profCard, "Choose media folder manually", COL_DARK) { pickFolder() }
-        inner.addView(profCard)
+        val c2 = card()
+        c2.addView(titleRow("WhatsApp profiles"))
+        profilesBox = LinearLayout(this)
+        profilesBox.orientation = LinearLayout.VERTICAL
+        c2.addView(profilesBox)
+        val r = rowH()
+        r.addView(btn2("Refresh") { refreshProfiles() }, weighted(r))
+        r.addView(spacer())
+        r.addView(btn("Search entire storage") { deepSearchNow() }, weighted(r))
+        c2.addView(r)
+        val r2 = rowH()
+        r2.addView(btn2("Choose media folder manually") { pickFolder() }, weighted(r2))
+        c2.addView(r2)
+        p.addView(c2)
 
-        val scanCard = card()
-        tv(scanCard, "3. Scan storage", 15f, COL_TEXT, true)
-        scanSummary = tv(scanCard, "Not scanned yet.", 13f, COL_SUB)
-        addBtn(scanCard, "Scan WhatsApp storage", COL_GREEN) { runScan() }
-        inner.addView(scanCard)
-
-        tv(inner, "Categories (tap Clean to choose all / received / sent)", 13f, COL_SUB)
-        catContainer = LinearLayout(this)
-        catContainer.orientation = LinearLayout.VERTICAL
-        inner.addView(catContainer)
-
-        return scroll
+        val c3 = card()
+        c3.addView(titleRow("How it works"))
+        val tips = listOf(
+            "Everything is a dry run until you tap the DRY chip in the top bar.",
+            "Pick a profile here, then scan it on the Clean tab.",
+            "Every result has a View button - see the actual media before you delete anything.",
+            "The activity log can be dragged, collapsed or closed from its header."
+        )
+        for (t in tips) c3.addView(bullet(t))
+        p.addView(c3)
     }
 
-    private fun buildCleanPage(): ScrollView {
-        val (scroll, inner) = page()
-        pages.add(scroll)
-
-        val info = card()
-        tv(info, "Safe cleaning", 15f, COL_TEXT, true)
-        tv(info, "Dry run is ON by default: every action below only previews what it would do. Your chat databases (Databases / Backups) are never touched.", 13f, COL_SUB)
-        inner.addView(info)
-
-        val ageCard = card()
-        tv(ageCard, "Media older than N days", 15f, COL_TEXT, true)
-        tv(ageCard, "Removes received and sent media older than the selected age.", 13f, COL_SUB)
-        val stepper = LinearLayout(this)
-        stepper.orientation = LinearLayout.HORIZONTAL
-        stepper.gravity = Gravity.CENTER_VERTICAL
-        val minus = Button(this)
-        minus.text = "- 5 days"
-        minus.textSize = 12f
-        minus.isAllCaps = false
-        minus.backgroundTintList = ColorStateList.valueOf(0xFFECEFF1.toInt())
-        minus.setTextColor(COL_DARK)
-        minus.setOnClickListener { stepDays(-5) }
-        stepper.addView(minus)
-        daysLabel = TextView(this)
-        daysLabel.text = days.toString() + " days"
-        daysLabel.textSize = 16f
-        daysLabel.setTextColor(COL_DARK)
-        daysLabel.setTypeface(null, Typeface.BOLD)
-        daysLabel.gravity = Gravity.CENTER
-        daysLabel.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        stepper.addView(daysLabel)
-        val plus = Button(this)
-        plus.text = "+ 5 days"
-        plus.textSize = 12f
-        plus.isAllCaps = false
-        plus.backgroundTintList = ColorStateList.valueOf(0xFFECEFF1.toInt())
-        plus.setTextColor(COL_DARK)
-        plus.setOnClickListener { stepDays(5) }
-        stepper.addView(plus)
-        ageCard.addView(stepper)
-        addBtn(ageCard, "Clean old media", COL_RED) { runCleanOld() }
-        inner.addView(ageCard)
-
-        val backupCard = card()
-        tv(backupCard, "msgstore backups", 15f, COL_TEXT, true)
-        tv(backupCard, "WhatsApp keeps daily chat-backup files. Keep only the newest ones to free space.", 13f, COL_SUB)
-        addBtn(backupCard, "Prune backups (keep 5 newest)", COL_TEAL) { runPruneBackups() }
-        inner.addView(backupCard)
-
-        val emptyCard = card()
-        tv(emptyCard, "Empty folders", 15f, COL_TEXT, true)
-        tv(emptyCard, "Left-over folders with no real content. Remove them to keep storage tidy.", 13f, COL_SUB)
-        addBtn(emptyCard, "Remove empty folders", COL_TEAL) { runRemoveEmpty() }
-        inner.addView(emptyCard)
-
-        return scroll
+    private fun bullet(text: String): TextView {
+        val t = tv("- " + text, 12f, COL_SUB)
+        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        lp.bottomMargin = dp(4)
+        t.layoutParams = lp
+        return t
     }
 
-    private fun buildToolsPage(): ScrollView {
-        val (scroll, inner) = page()
-        pages.add(scroll)
-
-        val dupCard = card()
-        tv(dupCard, "Duplicate media", 15f, COL_TEXT, true)
-        tv(dupCard, "Finds files with identical content (size + SHA-256 hash), shows a preview, then deletes only the extra copies - the earliest original of every group is always kept.", 13f, COL_SUB)
-        addBtn(dupCard, "Find duplicates", COL_GREEN) { runDuplicates() }
-        inner.addView(dupCard)
-
-        val exifCard = card()
-        tv(exifCard, "Repair photo dates (EXIF)", 15f, COL_TEXT, true)
-        tv(exifCard, "WhatsApp strips the capture date from photos. This reads the timestamp from the filename and writes it back into the photo EXIF, so your gallery shows photos on the right days.", 13f, COL_SUB)
-        addBtn(exifCard, "Scan for photos needing repair", COL_GREEN) { runExifScan() }
-        inner.addView(exifCard)
-
-        val statusCard = card()
-        tv(statusCard, "Status saver", 15f, COL_TEXT, true)
-        tv(statusCard, "Copies the 24-hour .Statuses into permanent dated folders before they expire.", 13f, COL_SUB)
-        addBtn(statusCard, "Save statuses now", COL_TEAL) { runSaveStatuses() }
-        inner.addView(statusCard)
-
-        val orgCard = card()
-        tv(orgCard, "Organize by date", 15f, COL_TEXT, true)
-        tv(orgCard, "Copies media into WMSuite-Organized/YYYY-MM/Category folders. Originals stay untouched.", 13f, COL_SUB)
-        addBtn(orgCard, "Organize by date", COL_TEAL) { runOrganize() }
-        inner.addView(orgCard)
-
-        return scroll
-    }
-
-    private fun buildChatsPage(): ScrollView {
-        val (scroll, inner) = page()
-        pages.add(scroll)
-
-        val guide = card()
-        tv(guide, "Organize by contact", 15f, COL_TEXT, true)
-        tv(guide, "WhatsApp media cannot be linked to a contact on a normal (non-rooted) phone - the chat database is end-to-end encrypted. Instead, export chats from WhatsApp and the app copies their media into per-contact folders:", 13f, COL_SUB)
-        tv(guide, "1. In WhatsApp or WhatsApp Business, open the chat.", 13f, COL_TEXT)
-        tv(guide, "2. Tap the contact name at the top, then the three-dot menu, then More, then Export chat.", 13f, COL_TEXT)
-        tv(guide, "3. Choose Include media and save the ZIP into your Downloads folder.", 13f, COL_TEXT)
-        tv(guide, "4. Come back here, set the folder below and tap Find chat exports.", 13f, COL_TEXT)
-        tv(guide, "Your chat, the exported ZIP and WhatsApp itself are never modified - media is only copied.", 12f, COL_SUB)
-        inner.addView(guide)
-
-        val findCard = card()
-        tv(findCard, "Chat exports", 15f, COL_TEXT, true)
-        exportFolderInput = EditText(this)
-        exportFolderInput.hint = "Download"
-        exportFolderInput.setText("Download")
-        exportFolderInput.textSize = 14f
-        findCard.addView(exportFolderInput)
-        addBtn(findCard, "Find chat exports", COL_GREEN) { findExports() }
-        exportsContainer = LinearLayout(this)
-        exportsContainer.orientation = LinearLayout.VERTICAL
-        findCard.addView(exportsContainer)
-        inner.addView(findCard)
-
-        return scroll
-    }
-
-    private fun customRootPath(): String? {
-        val path = getSharedPreferences("wmsuite", MODE_PRIVATE).getString("customRoot", null) ?: return null
-        return if (File(path).isDirectory) path else null
-    }
-
-    private fun refreshProfiles(announce: Boolean) {
+    private fun refreshProfiles() {
+        profilesBox.removeAllViews()
         if (!hasStorageAccess()) {
-            profiles = emptyList()
-            renderProfiles()
+            profilesBox.addView(tv("Grant storage access first.", 13f, COL_SUB))
             return
         }
-        if (!busy.compareAndSet(false, true)) { return }
-        status("Looking for WhatsApp profiles...")
-        Thread {
-            try {
-                var list = Profiles.detect(Environment.getExternalStorageDirectory())
-                list = Profiles.withCustom(list, customRootPath())
-                runOnUiThread {
-                    profiles = list
-                    if (selected == null || !list.contains(selected)) selected = list.firstOrNull()
-                    renderProfiles()
-                    if (announce) {
-                        if (list.isEmpty()) {
-                            toast("No WhatsApp storage found - use Search or pick the folder manually.")
-                            log("No WhatsApp storage found. Use 'Search entire storage' or 'Choose media folder manually' below.")
-                        } else {
-                            log("Found " + list.size + " profile(s). The most active one is preselected.")
-                        }
-                    }
+        runTask("Scanning for WhatsApp profiles") {
+            val found = Profiles.withCustom(Profiles.detect(ext()), customRootPath())
+            log("Found " + found.size + " profile(s)")
+            runOnUiThread {
+                profilesBox.removeAllViews()
+                if (found.isEmpty()) {
+                    profilesBox.addView(tv("No WhatsApp media found yet. Try Search entire storage, or pick the folder manually.", 13f, COL_SUB))
                 }
-            } catch (e: Exception) {
-                log("Profile detection error: " + e.message)
-            } finally {
-                busy.set(false)
-                status("Ready")
+                for (prof in found) profilesBox.addView(profileRow(prof))
             }
-        }.start()
+        }
     }
 
-    private fun renderProfiles() {
-        profileContainer.removeAllViews()
-        if (profiles.isEmpty()) {
-            val t = TextView(this)
-            t.text = "No WhatsApp storage found yet. Grant storage access (above), then tap 'Search entire storage' or 'Choose media folder manually'."
-            t.textSize = 13f
-            t.setTextColor(COL_SUB)
-            profileContainer.addView(t)
-            return
-        }
-        for (p in profiles) {
-            val row = LinearLayout(this)
-            row.orientation = LinearLayout.VERTICAL
-            row.setPadding(dp(12), dp(10), dp(12), dp(10))
-            row.background = roundedBg(
-                if (p == selected) 0xFFE8F5E9.toInt() else 0xFFFAFAFA.toInt(),
-                dp(10),
-                if (p == selected) COL_GREEN else 0xFFEEEEEE.toInt()
-            )
-            val nameRow = LinearLayout(this)
-            nameRow.orientation = LinearLayout.HORIZONTAL
-            nameRow.gravity = Gravity.CENTER_VERTICAL
-            val name = TextView(this)
-            name.text = p.name
-            name.textSize = 14f
-            name.setTextColor(COL_TEXT)
-            name.setTypeface(null, Typeface.BOLD)
-            nameRow.addView(name)
-            val badge = TextView(this)
-            badge.text = if (p.isActive()) "  ACTIVE  " else "  inactive  "
-            badge.textSize = 10f
-            badge.typeface = Typeface.DEFAULT_BOLD
-            if (p.isActive()) {
-                badge.setTextColor(Color.WHITE)
-                badge.setBackgroundColor(COL_GREEN)
-            } else {
-                badge.setTextColor(0xFF9E9E9E.toInt())
-                badge.setBackgroundColor(0xFFEEEEEE.toInt())
-            }
-            badge.setPadding(dp(6), dp(2), dp(6), dp(2))
-            val blp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            blp.leftMargin = dp(8)
-            badge.layoutParams = blp
-            nameRow.addView(badge)
-            row.addView(nameRow)
-            val info = TextView(this)
-            info.text = p.files.toString() + " files - " + Cleaner.humanSize(p.bytes) + " - " + p.ageLabel()
-            info.textSize = 12f
-            info.setTextColor(COL_SUB)
-            row.addView(info)
-            val path = TextView(this)
-            path.text = p.root.absolutePath
-            path.textSize = 10f
-            path.setTextColor(COL_SUB)
-            row.addView(path)
-            row.setOnClickListener {
-                selected = p
-                log("Selected profile: " + p.name + " [" + p.root.absolutePath + "]")
-                scanSummary.text = "Not scanned yet."
-                catContainer.removeAllViews()
-                renderProfiles()
-            }
-            val rlp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            rlp.topMargin = dp(6)
-            row.layoutParams = rlp
-            profileContainer.addView(row)
-        }
+    private fun profileRow(prof: Profiles.WaProfile): View {
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.background = roundedBg(COL_CARD2, 10)
+        box.setPadding(dp(12), dp(10), dp(12), dp(10))
+        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        lp.bottomMargin = dp(8)
+        box.layoutParams = lp
+        val t1 = tv(prof.name, 14f, COL_TEXT)
+        t1.typeface = Typeface.DEFAULT_BOLD
+        box.addView(t1)
+        box.addView(tv(prof.root.absolutePath, 11f, COL_SUB))
+        box.addView(tv(prof.files.toString() + " files - " + Cleaner.humanSize(prof.bytes) + " - " + prof.ageLabel(), 12f, COL_SUB))
+        val use = btn(if (activeProfile == prof) "SELECTED" else "Use this profile") { selectProfile(prof) }
+        val ulp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        ulp.topMargin = dp(6)
+        use.layoutParams = ulp
+        box.addView(use)
+        return box
+    }
+
+    private fun selectProfile(prof: Profiles.WaProfile) {
+        activeProfile = prof
+        log("Active profile: " + prof.name + "  [" + prof.root.absolutePath + "]")
+        toast("Profile selected: " + prof.name)
     }
 
     private fun deepSearchNow() {
-        if (!hasStorageAccess()) { toast("Grant storage permission first."); return }
-        if (!busy.compareAndSet(false, true)) { toast("Another task is running, please wait."); return }
-        status("Searching your storage for WhatsApp media folders...")
-        Thread {
-            try {
-                val found = Profiles.deepSearch(Environment.getExternalStorageDirectory()) { msg -> log(msg) }
-                runOnUiThread {
-                    profiles = found
-                    selected = found.firstOrNull()
-                    renderProfiles()
-                    scanSummary.text = "Not scanned yet."
-                    catContainer.removeAllViews()
-                }
-                if (found.isEmpty()) {
-                    log("Deep search: no WhatsApp media folders found anywhere. Use 'Choose media folder manually'.")
-                    toast("No WhatsApp media folders found. Pick the folder manually.")
-                } else {
-                    log("Deep search found " + found.size + " folder(s). The most active one is selected - tap 'Scan storage'.")
-                }
-            } catch (e: Exception) {
-                log("Deep search error: " + e.message)
-            } finally {
-                busy.set(false)
-                status("Ready")
+        if (!hasStorageAccess()) {
+            toast("Grant storage access first")
+            return
+        }
+        runTask("Deep storage search") {
+            val found = Profiles.deepSearch(ext()) { m -> log(m) }
+            log("Deep search finished: " + found.size + " candidate folder(s)")
+            runOnUiThread {
+                val merged = Profiles.withCustom(found, customRootPath())
+                profilesBox.removeAllViews()
+                if (merged.isEmpty()) profilesBox.addView(tv("Still nothing found. Use Choose media folder manually.", 13f, COL_SUB))
+                for (prof in merged) profilesBox.addView(profileRow(prof))
             }
-        }.start()
+        }
     }
 
     private fun pickFolder() {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
-        try {
-            startActivityForResult(intent, 7001)
-        } catch (e: Exception) {
-            toast("No folder picker available on this device.")
-        }
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), 7001)
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != 7001 || resultCode != RESULT_OK || data == null) return
-        val uri = data.data ?: return
-        val dir = treeUriToPath(uri)
-        if (dir == null || !dir.isDirectory) {
-            toast("Could not read that location. Pick a folder on your device storage (not a cloud or recent folder).")
-            return
-        }
-        if (dir.absolutePath == Environment.getExternalStorageDirectory().absolutePath) {
-            toast("Please pick the specific WhatsApp or media folder, not the whole storage.")
-            return
-        }
-        getSharedPreferences("wmsuite", MODE_PRIVATE).edit().putString("customRoot", dir.absolutePath).apply()
-        if (!busy.compareAndSet(false, true)) {
-            toast("Folder saved. It will appear in the profile list shortly.")
-            return
-        }
-        status("Reading chosen folder...")
-        Thread {
-            try {
-                val prof = Profiles.profileFrom("Chosen folder", dir)
-                runOnUiThread {
-                    if (prof == null) {
-                        toast("That folder is empty or unreadable.")
-                    } else {
-                        profiles = Profiles.withCustom(profiles, dir.absolutePath)
-                        selected = prof
-                        renderProfiles()
-                        scanSummary.text = "Not scanned yet."
-                        catContainer.removeAllViews()
-                        log("Using folder: " + dir.absolutePath)
-                    }
-                }
-            } catch (e: Exception) {
-                log("Folder pick error: " + e.message)
-            } finally {
-                busy.set(false)
-                status("Ready")
+        if (resultCode != RESULT_OK || data == null) return
+        val treeUri = data.data ?: return
+        if (requestCode == 7001) {
+            val path = treeUriToPath(treeUri)
+            if (path == null) {
+                toast("Could not resolve that folder")
+                return
             }
-        }.start()
+            val f = File(path)
+            if (f.absolutePath == ext().absolutePath) {
+                toast("That is the whole storage root - pick the WhatsApp media folder instead")
+                return
+            }
+            prefs().edit().putString("customRoot", path).apply()
+            toast("Folder saved")
+            log("Manual media folder: " + path)
+            refreshProfiles()
+        } else if (requestCode == 7002) {
+            val path = treeUriToPath(treeUri)
+            if (path == null) {
+                toast("Could not resolve that folder")
+                return
+            }
+            prefs().edit().putString("exportsDir", path).apply()
+            refreshExports(path)
+        }
     }
 
-    private fun treeUriToPath(uri: Uri): File? {
+    private fun treeUriToPath(treeUri: Uri): String? {
         return try {
-            if (uri.authority != "com.android.externalstorage.documents") return null
-            val docId = DocumentsContract.getTreeDocumentId(uri)
-            val parts = docId.split(":")
-            if (parts.size < 2 || parts[1].isEmpty()) return null
-            if (parts[0] == "primary") File(Environment.getExternalStorageDirectory(), parts[1])
-            else File("/storage/" + parts[0] + "/" + parts[1])
+            if (treeUri.authority == "com.android.externalstorage.documents") {
+                val docId = DocumentsContract.getTreeDocumentId(treeUri)
+                val parts = docId.split(":")
+                if (parts.size >= 2 && parts[0].contains("primary")) {
+                    Environment.getExternalStorageDirectory().absolutePath + "/" + parts[1]
+                } else {
+                    null
+                }
+            } else {
+                null
+            }
         } catch (e: Exception) {
             null
         }
     }
 
-    private fun catCard(c: Cleaner.CategoryStat): View {
-        val card = LinearLayout(this)
-        card.orientation = LinearLayout.VERTICAL
-        card.setPadding(dp(12), dp(10), dp(12), dp(10))
-        card.background = roundedBg(COL_CARD, dp(10), 0xFFE3E6E8.toInt())
-        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        lp.topMargin = dp(8)
-        card.layoutParams = lp
+    // ---------- Clean tab ----------
 
-        val nameRow = LinearLayout(this)
-        nameRow.orientation = LinearLayout.HORIZONTAL
-        nameRow.gravity = Gravity.CENTER_VERTICAL
-        val name = TextView(this)
-        name.text = c.name
-        name.textSize = 14f
-        name.setTextColor(COL_TEXT)
-        name.setTypeface(null, Typeface.BOLD)
-        name.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        nameRow.addView(name)
-        val cleanBtn = Button(this)
-        cleanBtn.text = "Clean"
-        cleanBtn.textSize = 12f
-        cleanBtn.isAllCaps = false
-        cleanBtn.setTextColor(Color.WHITE)
-        cleanBtn.backgroundTintList = ColorStateList.valueOf(COL_RED)
-        cleanBtn.setOnClickListener { scopeDialog(c) }
-        nameRow.addView(cleanBtn)
-        card.addView(nameRow)
+    private fun buildClean(p: LinearLayout) {
+        cleanBox = LinearLayout(this)
+        cleanBox.orientation = LinearLayout.VERTICAL
+        p.addView(cleanBox)
+        rebuildClean()
+    }
 
-        val received = c.files - c.sentFiles
-        val info = TextView(this)
-        info.text = c.files.toString() + " files - " + Cleaner.humanSize(c.bytes) + "\n" + received + " received - " + c.sentFiles + " sent"
-        info.textSize = 12f
-        info.setTextColor(COL_SUB)
-        card.addView(info)
-        return card
+    private fun rebuildClean() {
+        cleanBox.removeAllViews()
+        val prof = activeProfile
+        if (prof == null) {
+            val c = card()
+            c.addView(titleRow("No profile selected"))
+            c.addView(tv("Go to the Dashboard tab and pick a WhatsApp profile, or search your storage for it.", 13f, COL_SUB))
+            cleanBox.addView(c)
+            return
+        }
+        val hc = card()
+        hc.addView(titleRow("Profile: " + prof.name))
+        hc.addView(tv(prof.root.absolutePath, 11f, COL_SUB))
+        hc.addView(tv(prof.files.toString() + " files - " + Cleaner.humanSize(prof.bytes), 12f, COL_SUB))
+        val slp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        slp.topMargin = dp(8)
+        val scanBtn = btn("Scan media") { runScan() }
+        scanBtn.layoutParams = slp
+        hc.addView(scanBtn)
+        cleanBox.addView(hc)
+
+        for (stat in scanStats.values) cleanBox.addView(catCard(stat))
+        if (scanStats.isNotEmpty()) {
+            cleanBox.addView(ageCard(prof))
+            cleanBox.addView(backupsCard(prof))
+            cleanBox.addView(emptyCard(prof))
+        }
     }
 
     private fun runScan() {
-        if (!hasStorageAccess()) { toast("Grant storage permission first."); return }
-        val p = selected
-        if (p == null) { toast("No WhatsApp profile selected - wait for the profile list to load."); return }
-        if (!busy.compareAndSet(false, true)) { toast("Another task is running, please wait."); return }
-        doScan(p)
-    }
-
-    private fun doScan(p: Profiles.WaProfile) {
-        status("Scanning " + p.name + "...")
-        Thread {
-            try {
-                val cats = Cleaner.scan(p.root)
-                var files = 0
-                var bytes = 0L
-                for (c in cats) {
-                    files += c.files
-                    bytes += c.bytes
-                }
-                runOnUiThread {
-                    catContainer.removeAllViews()
-                    val sorted = cats.sortedByDescending { it.bytes }
-                    for (c in sorted) catContainer.addView(catCard(c))
-                    scanSummary.text = cats.size.toString() + " categories - " + files + " files - " + Cleaner.humanSize(bytes)
-                }
-                if (cats.isEmpty()) {
-                    log("Scan: 0 categories in " + p.root.absolutePath + ". Tap 'Search entire storage' or 'Choose media folder manually' on the Dashboard.")
-                } else {
-                    log("Scan finished: " + cats.size + " categories, " + files + " files, " + Cleaner.humanSize(bytes) + " total.")
-                }
-            } catch (e: Exception) {
-                log("Scan error: " + e.message)
-            } finally {
-                busy.set(false)
-                status("Ready")
+        val prof = activeProfile ?: return
+        runTask("Scanning " + prof.name) {
+            val stats = Cleaner.scan(prof.root)
+            scanStats.clear()
+            var total = 0L
+            var files = 0
+            for (s in stats) {
+                scanStats[s.name] = s
+                total += s.bytes
+                files += s.files
             }
-        }.start()
+            log("Scan finished: " + stats.size + " categories, " + files + " files, " + Cleaner.humanSize(total))
+            if (stats.isEmpty()) log("Nothing recognized - is this a WhatsApp media folder?")
+            runOnUiThread { rebuildClean() }
+        }
     }
 
-    private fun scopeDialog(c: Cleaner.CategoryStat) {
-        val received = c.files - c.sentFiles
+    private fun catCard(stat: Cleaner.CategoryStat): View {
+        val c = card()
+        c.addView(titleRow(titleFor(stat)))
+        c.addView(tv(stat.files.toString() + " files - received " + (stat.files - stat.sentFiles) + ", sent " + stat.sentFiles, 12f, COL_SUB))
+        val r = rowH()
+        r.addView(btn2("View media") { viewMedia(stat) }, weighted(r))
+        r.addView(spacer())
+        r.addView(btn("Clean") { scopeDialog(stat) }, weighted(r))
+        c.addView(r)
+        return c
+    }
+
+    private fun viewMedia(stat: Cleaner.CategoryStat) {
+        runTask("Loading " + stat.name) {
+            val files = ArrayList<File>()
+            stat.folder.walkTopDown().filter { it.isFile && !it.name.startsWith(".") }.forEach {
+                if (files.size < 300) files.add(it)
+            }
+            runOnUiThread {
+                if (files.isEmpty()) toast("No files here")
+                else MediaViews.gallery(this@MainActivity, stat.name, files, stat.folder.absolutePath)
+            }
+        }
+    }
+
+    private fun scopeDialog(stat: Cleaner.CategoryStat) {
         val options = arrayOf(
-            "All " + c.name + " files",
-            "Received only (" + received + ")",
-            "Sent only (" + c.sentFiles + ")"
+            "Everything (" + stat.files + " files)",
+            "Received only (" + (stat.files - stat.sentFiles) + " files)",
+            "Sent only (" + stat.sentFiles + " files)"
         )
-        val choice = intArrayOf(0)
         AlertDialog.Builder(this)
-            .setTitle("Clean " + c.name + "?")
-            .setSingleChoiceItems(options, 0) { _, which -> choice[0] = which }
-            .setPositiveButton("Continue") { _, _ -> confirmClean(c, choice[0]) }
+            .setTitle("Clean " + stat.name + " - what should go?")
+            .setItems(options) { d, which -> confirmClean(stat, which) }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    private fun confirmClean(c: Cleaner.CategoryStat, scope: Int) {
-        val label = if (scope == Cleaner.SCOPE_SENT) "sent" else if (scope == Cleaner.SCOPE_RECEIVED) "received" else "all"
-        val msg = if (isDry())
-            "Dry run: nothing will be deleted. You will see exactly what would go."
-            else "Permanently delete " + label + " " + c.name + " files? This cannot be undone."
-        AlertDialog.Builder(this)
-            .setTitle("Confirm")
-            .setMessage(msg)
-            .setPositiveButton("Go") { _, _ -> doClean(c, scope) }
-            .setNegativeButton("Cancel", null)
-            .show()
+    private fun confirmClean(stat: Cleaner.CategoryStat, scope: Int) {
+        val scopeName = if (scope == Cleaner.SCOPE_RECEIVED) "received media" else if (scope == Cleaner.SCOPE_SENT) "sent media" else "everything"
+        confirmGo("Clean " + stat.name, dryNote() + "Delete " + scopeName + " from " + stat.name + "?") { runClean(stat, scope) }
     }
 
-    private fun doClean(c: Cleaner.CategoryStat, scope: Int) {
-        if (!busy.compareAndSet(false, true)) { toast("Another task is running, please wait."); return }
-        val label = if (scope == Cleaner.SCOPE_SENT) "sent" else if (scope == Cleaner.SCOPE_RECEIVED) "received" else "all"
-        status("Cleaning " + c.name + "...")
-        Thread {
-            try {
-                val res = Cleaner.cleanFolder(c.folder, isDry(), scope)
-                log("Clean " + c.name + " (" + label + "): " + res.count + " files, " + Cleaner.humanSize(res.bytes) + (if (isDry()) " [dry run - nothing deleted]" else " [deleted]"))
-            } catch (e: Exception) {
-                log("Clean error: " + e.message)
-            } finally {
-                busy.set(false)
-                status("Ready")
+    private fun runClean(stat: Cleaner.CategoryStat, scope: Int) {
+        runTask((if (dryRun) "Dry-run clean " else "Clean ") + stat.name) {
+            val res = Cleaner.cleanFolder(stat.folder, dryRun, scope)
+            log((if (dryRun) "Would delete " else "Deleted ") + res.count + " files (" + Cleaner.humanSize(res.bytes) + ") from " + stat.name)
+            if (!dryRun) log("Tip: run Scan media again to refresh the numbers.")
+        }
+    }
+
+    private fun ageCard(prof: Profiles.WaProfile): View {
+        val c = card()
+        c.addView(titleRow("Old media cleanup"))
+        c.addView(tv("Remove media older than a number of days - the classic WhatsApp space saver.", 12f, COL_SUB))
+        val daysLabel = tv(oldDays.toString() + " days", 14f, COL_TEXT)
+        daysLabel.gravity = Gravity.CENTER
+        val minus = btn2(" - ") { oldDays = max(7, oldDays - 30); daysLabel.text = oldDays.toString() + " days" }
+        val plus = btn2(" + ") { oldDays = oldDays + 30; daysLabel.text = oldDays.toString() + " days" }
+        val r = rowH()
+        r.gravity = Gravity.CENTER_VERTICAL
+        r.addView(minus, weighted(r))
+        r.addView(daysLabel, weighted(r))
+        r.addView(plus, weighted(r))
+        c.addView(r)
+        val r2 = rowH()
+        r2.addView(btn2("Preview old media") { previewOld(prof) }, weighted(r2))
+        r2.addView(spacer())
+        r2.addView(btn("Delete old media") { confirmOld(prof) }, weighted(r2))
+        c.addView(r2)
+        return c
+    }
+
+    private fun previewOld(prof: Profiles.WaProfile) {
+        runTask("Finding old media") {
+            val cutoff = System.currentTimeMillis() - oldDays * 86_400_000L
+            val files = ArrayList<File>()
+            prof.root.walkTopDown().filter { f ->
+                f.isFile && !f.name.startsWith(".") && f.lastModified() < cutoff && Cleaner.categoryFor(f, prof.root) != null
+            }.forEach {
+                if (files.size < 300) files.add(it)
             }
-            val p = selected
-            if (p != null && busy.compareAndSet(false, true)) doScan(p)
-        }.start()
-    }
-
-    private fun stepDays(d: Int) {
-        days = Math.max(1, Math.min(3650, days + d))
-        daysLabel.text = days.toString() + " days"
-    }
-
-    private fun runCleanOld() {
-        confirmGo(
-            "Clean media older than " + days + " days",
-            if (isDry()) "Dry run: nothing will be deleted, you will only see what would go."
-            else "Permanently delete all media older than " + days + " days? This cannot be undone."
-        ) {
-            runTask("Cleaning old media") { p ->
-                val res = Cleaner.deleteOlderThan(p.root, days, isDry())
-                "Old media (older than " + days + " days): " + res.count + " files, " + Cleaner.humanSize(res.bytes) + suffix()
+            runOnUiThread {
+                if (files.isEmpty()) toast("Nothing older than " + oldDays + " days")
+                else MediaViews.gallery(this@MainActivity, "Older than " + oldDays + " days", files, "preview before deleting")
             }
         }
     }
 
-    private fun runPruneBackups() {
-        confirmGo(
-            "Prune msgstore backups",
-            if (isDry()) "Dry run: nothing will be deleted, you will only see what would go."
-            else "Keep only the 5 newest msgstore backup files and delete the rest?"
-        ) {
-            runTask("Pruning backups") { p ->
-                val res = Cleaner.pruneBackups(File(p.root, "Databases"), 5, isDry())
-                "msgstore backups pruned: " + res.count + " files, " + Cleaner.humanSize(res.bytes) + suffix()
+    private fun confirmOld(prof: Profiles.WaProfile) {
+        confirmGo("Delete old media", dryNote() + "Delete media older than " + oldDays + " days?") {
+            runTask((if (dryRun) "Dry-run delete old media" else "Deleting old media")) {
+                val res = Cleaner.deleteOlderThan(prof.root, oldDays, dryRun)
+                log((if (dryRun) "Would delete " else "Deleted ") + res.count + " old files (" + Cleaner.humanSize(res.bytes) + ")")
             }
         }
     }
 
-    private fun runRemoveEmpty() {
-        confirmGo(
-            "Remove empty folders",
-            if (isDry()) "Dry run: nothing will be deleted, you will only see what would go."
-            else "Remove all empty folders inside " + (selected?.name ?: "the profile") + "?"
-        ) {
-            runTask("Removing empty folders") { p ->
-                val removed = if (isDry()) Cleaner.listEmptyDirs(p.root) else Cleaner.removeEmptyDirs(p.root)
-                "Empty folders: " + removed.size + (if (isDry()) " would be removed [dry run]" else " removed")
-            }
-        }
-    }
-
-    private fun runDuplicates() {
-        if (!hasStorageAccess()) { toast("Grant storage permission first."); return }
-        val p = selected
-        if (p == null) { toast("No WhatsApp profile selected - wait for the profile list to load."); return }
-        if (!busy.compareAndSet(false, true)) { toast("Another task is running, please wait."); return }
-        status("Scanning for duplicates...")
-        Thread {
-            try {
-                dupGroups = Cleaner.findDuplicateGroups(p.root)
-                var extra = 0
-                var bytes = 0L
-                for (g in dupGroups) {
-                    extra += g.size - 1
-                    bytes += g[0].length() * (g.size - 1)
-                }
-                if (dupGroups.isEmpty()) {
-                    log("Duplicates: none found.")
-                    toast("No duplicate media found.")
-                } else {
-                    runOnUiThread {
-                        AlertDialog.Builder(this)
-                            .setTitle("Duplicate media found")
-                            .setMessage(dupGroups.size.toString() + " duplicate groups. " + extra + " extra copies can free " + Cleaner.humanSize(bytes) + ". The earliest original in each group is always kept.")
-                            .setPositiveButton(if (isDry()) "Preview delete" else "Delete now") { _, _ -> doDeleteDups() }
-                            .setNegativeButton("Cancel", null)
-                            .show()
+    private fun backupsCard(prof: Profiles.WaProfile): View {
+        val c = card()
+        c.addView(titleRow("Chat backup pruning"))
+        c.addView(tv("WhatsApp piles up msgstore backups. This keeps the newest 5 in Databases and Backups and deletes the rest.", 12f, COL_SUB))
+        val pruneBtn = btn("Prune old backups") {
+            confirmGo("Prune old backups", dryNote() + "Delete every msgstore backup except the newest 5?") {
+                runTask((if (dryRun) "Dry-run prune backups" else "Pruning backups")) {
+                    var count = 0
+                    var bytes = 0L
+                    for (dir in listOf(File(prof.root, "Databases"), File(prof.root, "Backups"))) {
+                        val res = Cleaner.pruneBackups(dir, 5, dryRun)
+                        count += res.count
+                        bytes += res.bytes
                     }
+                    log((if (dryRun) "Would delete " else "Deleted ") + count + " old backups (" + Cleaner.humanSize(bytes) + "), keeping the newest 5.")
                 }
-            } catch (e: Exception) {
-                log("Duplicates error: " + e.message)
-            } finally {
-                busy.set(false)
-                status("Ready")
-            }
-        }.start()
-    }
-
-    private fun doDeleteDups() {
-        if (!busy.compareAndSet(false, true)) { toast("Another task is running, please wait."); return }
-        status("Removing duplicates...")
-        Thread {
-            try {
-                val res = Cleaner.deleteDuplicateGroups(dupGroups, isDry())
-                log("Duplicates: " + res.count + " extra copies, " + Cleaner.humanSize(res.bytes) + (if (isDry()) " [dry run - nothing deleted]" else " [done - the earliest original of each group was kept]"))
-            } catch (e: Exception) {
-                log("Duplicate removal error: " + e.message)
-            } finally {
-                busy.set(false)
-                status("Ready")
-            }
-            val p = selected
-            if (p != null && busy.compareAndSet(false, true)) doScan(p)
-        }.start()
-    }
-
-    private fun runExifScan() {
-        if (!hasStorageAccess()) { toast("Grant storage permission first."); return }
-        val p = selected
-        if (p == null) { toast("No WhatsApp profile selected - wait for the profile list to load."); return }
-        if (!busy.compareAndSet(false, true)) { toast("Another task is running, please wait."); return }
-        status("Scanning photos for missing dates...")
-        Thread {
-            try {
-                exifItems = ExifRepair.scan(p.root)
-                if (exifItems.isEmpty()) {
-                    log("EXIF repair: no photos need fixing.")
-                    toast("No photos need EXIF repair.")
-                } else {
-                    runOnUiThread {
-                        AlertDialog.Builder(this)
-                            .setTitle("Photos needing date repair")
-                            .setMessage(exifItems.size.toString() + " photos are missing the capture date in the file. Apply the repair now?")
-                            .setPositiveButton(if (isDry()) "Preview repair" else "Repair now") { _, _ -> doExifApply() }
-                            .setNegativeButton("Cancel", null)
-                            .show()
-                    }
-                }
-            } catch (e: Exception) {
-                log("EXIF scan error: " + e.message)
-            } finally {
-                busy.set(false)
-                status("Ready")
-            }
-        }.start()
-    }
-
-    private fun doExifApply() {
-        if (!busy.compareAndSet(false, true)) { toast("Another task is running, please wait."); return }
-        status("Repairing photo dates...")
-        Thread {
-            try {
-                val n = ExifRepair.apply(exifItems, isDry())
-                log("EXIF repair: " + n + " photos updated" + (if (isDry()) " [dry run - nothing written]" else " - your gallery should now show them on the right days."))
-            } catch (e: Exception) {
-                log("EXIF repair error: " + e.message)
-            } finally {
-                busy.set(false)
-                status("Ready")
-            }
-        }.start()
-    }
-
-    private fun runSaveStatuses() {
-        confirmGo(
-            "Save statuses",
-            if (isDry()) "Dry run: nothing will be copied, you will only see what would be saved."
-            else "Copy the current 24-hour statuses into permanent dated folders? Originals stay untouched."
-        ) {
-            runTask("Saving statuses") { p ->
-                val src = File(p.root, ".Statuses")
-                val target = File(Environment.getExternalStorageDirectory(), "WMSuite-Saved")
-                val res = Cleaner.saveStatuses(src, target, isDry())
-                "Statuses saved: " + res.count + " files, " + Cleaner.humanSize(res.bytes) + " into " + target.name + suffix()
             }
         }
+        c.addView(pruneBtn)
+        return c
     }
 
-    private fun runOrganize() {
-        confirmGo(
-            "Organize by date",
-            if (isDry()) "Dry run: nothing will be copied, you will only see what would be organized."
-            else "Copy media into WMSuite-Organized/YYYY-MM/Category folders? Originals stay untouched."
-        ) {
-            runTask("Organizing by date") { p ->
-                val out = File(Environment.getExternalStorageDirectory(), "WMSuite-Organized")
-                val res = Cleaner.organizeByDate(p.root, out, isDry())
-                "Organized: " + res.count + " files, " + Cleaner.humanSize(res.bytes) + " copied to " + out.name + suffix()
-            }
-        }
-    }
-
-    private fun findExports() {
-        if (!hasStorageAccess()) { toast("Grant storage permission first."); return }
-        if (!busy.compareAndSet(false, true)) { toast("Another task is running, please wait."); return }
-        status("Looking for chat exports...")
-        Thread {
-            try {
-                val folderName = exportFolderInput.text.toString().trim()
-                if (folderName.isEmpty()) {
-                    toast("Enter the folder with your exported chats (e.g. Download).")
-                    return@Thread
+    private fun emptyCard(prof: Profiles.WaProfile): View {
+        val c = card()
+        c.addView(titleRow("Empty folder cleanup"))
+        c.addView(tv("Finds folders left behind by WhatsApp, for example after cleaning.", 12f, COL_SUB))
+        val r = rowH()
+        r.addView(btn2("List empty folders") {
+            runTask("Listing empty folders") {
+                val dirs = Cleaner.listEmptyDirs(prof.root)
+                log("Empty folders found: " + dirs.size)
+                var i = 0
+                for (d in dirs) {
+                    if (i >= 20) break
+                    i++
+                    log("  - " + d.absolutePath)
                 }
-                val folder = File(Environment.getExternalStorageDirectory(), folderName)
-                val exports = ChatExportOrganizer.findExports(folder)
-                runOnUiThread {
-                    exportsContainer.removeAllViews()
-                    if (exports.isEmpty()) {
-                        val t = TextView(this)
-                        t.text = "No chat exports found in " + folderName + ". Export chats with media from WhatsApp first (see the steps above)."
-                        t.textSize = 13f
-                        t.setTextColor(COL_SUB)
-                        exportsContainer.addView(t)
+                if (dirs.isEmpty()) log("No empty folders.")
+            }
+        }, weighted(r))
+        r.addView(spacer())
+        r.addView(btn("Remove empty folders") {
+            confirmGo("Remove empty folders", dryNote() + "Delete every now-empty folder inside the WhatsApp folders?") {
+                runTask((if (dryRun) "Dry-run remove empty folders" else "Removing empty folders")) {
+                    if (dryRun) {
+                        val dirs = Cleaner.listEmptyDirs(prof.root)
+                        log("Dry run: would remove " + dirs.size + " empty folders.")
                     } else {
-                        for (e in exports) exportsContainer.addView(exportRow(e))
+                        val removed = Cleaner.removeEmptyDirs(prof.root)
+                        log("Removed " + removed.size + " empty folders.")
                     }
                 }
-                log("Chat exports found: " + exports.size + " in " + folder.absolutePath)
-            } catch (e: Exception) {
-                log("Chat export search error: " + e.message)
-            } finally {
-                busy.set(false)
-                status("Ready")
             }
-        }.start()
+        }, weighted(r))
+        c.addView(r)
+        return c
     }
 
-    private fun exportRow(e: ChatExportOrganizer.Export): View {
-        val row = LinearLayout(this)
-        row.orientation = LinearLayout.HORIZONTAL
-        row.gravity = Gravity.CENTER_VERTICAL
-        row.setPadding(dp(12), dp(10), dp(12), dp(10))
-        row.background = roundedBg(0xFFFAFAFA.toInt(), dp(10), 0xFFEEEEEE.toInt())
-        val label = TextView(this)
-        label.text = e.contact
-        label.textSize = 14f
-        label.setTextColor(COL_TEXT)
-        label.setTypeface(null, Typeface.BOLD)
-        label.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        row.addView(label)
-        val btn = Button(this)
-        btn.text = "Organize"
-        btn.textSize = 12f
-        btn.isAllCaps = false
-        btn.setTextColor(Color.WHITE)
-        btn.backgroundTintList = ColorStateList.valueOf(COL_GREEN)
-        btn.setOnClickListener { runImportExport(e) }
-        row.addView(btn)
-        return row
+    // ---------- Tools tab ----------
+
+    private fun buildTools(p: LinearLayout) {
+        toolsBox = LinearLayout(this)
+        toolsBox.orientation = LinearLayout.VERTICAL
+        p.addView(toolsBox)
+        rebuildTools()
     }
 
-    private fun runImportExport(e: ChatExportOrganizer.Export) {
-        if (!busy.compareAndSet(false, true)) { toast("Another task is running, please wait."); return }
-        status("Organizing " + e.contact + "...")
-        Thread {
-            try {
-                val out = File(Environment.getExternalStorageDirectory(), "WMSuite-Organized")
-                val res = ChatExportOrganizer.importExport(e.zip, out, isDry())
-                log("Organized " + e.contact + ": " + res.count + " files, " + Cleaner.humanSize(res.bytes) + (if (isDry()) " [dry run - nothing copied]" else " copied to WMSuite-Organized/Conversations/" + e.contact + "/"))
-            } catch (ex: Exception) {
-                log("Organize error for " + e.contact + ": " + ex.message)
-            } finally {
-                busy.set(false)
-                status("Ready")
+    private fun rebuildTools() {
+        toolsBox.removeAllViews()
+        val prof = activeProfile
+        if (prof == null) {
+            val c = card()
+            c.addView(titleRow("No profile selected"))
+            c.addView(tv("Pick a WhatsApp profile on the Dashboard tab first.", 13f, COL_SUB))
+            toolsBox.addView(c)
+            return
+        }
+        toolsBox.addView(dupCard(prof))
+        toolsBox.addView(exifCard(prof))
+        toolsBox.addView(statusCard(prof))
+        toolsBox.addView(organizeCard(prof))
+    }
+
+    private fun dupCard(prof: Profiles.WaProfile): View {
+        val c = card()
+        c.addView(titleRow("Duplicate finder"))
+        c.addView(tv("Finds files with identical content and shows them side by side, so you can compare with your own eyes before deleting. The earliest copy is always marked as the original.", 12f, COL_SUB))
+        c.addView(btn("Find duplicates") { runDuplicates(prof) })
+        return c
+    }
+
+    private fun runDuplicates(prof: Profiles.WaProfile) {
+        runTask("Finding duplicates") {
+            val groups = Cleaner.findDuplicateGroups(prof.root)
+            log("Duplicate scan: " + groups.size + " groups")
+            runOnUiThread {
+                if (groups.isEmpty()) {
+                    toast("No duplicates found")
+                    log("No duplicates found - nothing to clean.")
+                } else {
+                    MediaViews.duplicateCompare(this@MainActivity, groups, dryRun) { msg ->
+                        log(msg)
+                        toast(msg)
+                    }
+                }
             }
-        }.start()
+        }
+    }
+
+    private fun exifCard(prof: Profiles.WaProfile): View {
+        val c = card()
+        c.addView(titleRow("Gallery date repair (EXIF)"))
+        c.addView(tv("WhatsApp strips the capture date from photos. This reads the date from each filename and writes it back, so your gallery sorts photos correctly again.", 12f, COL_SUB))
+        c.addView(btn("Scan photos") { runExifScan(prof) })
+        if (exifItems.isNotEmpty()) {
+            c.addView(tv("Last scan: " + exifItems.size + " photos need a date repair.", 12f, COL_GREEN))
+            val r = rowH()
+            r.addView(btn2("Preview photos") { previewExif() }, weighted(r))
+            r.addView(spacer())
+            r.addView(btn("Repair dates") { confirmExif() }, weighted(r))
+            c.addView(r)
+        }
+        return c
+    }
+
+    private fun runExifScan(prof: Profiles.WaProfile) {
+        runTask("Scanning photo dates") {
+            val items = ExifRepair.scan(prof.root)
+            exifItems = items
+            log("EXIF scan: " + items.size + " photos have a missing or wrong capture date.")
+            runOnUiThread { rebuildTools() }
+        }
+    }
+
+    private fun previewExif() {
+        val files = ArrayList<File>()
+        for (item in exifItems) {
+            if (files.size < 300) files.add(item.file)
+        }
+        if (files.isEmpty()) {
+            toast("Nothing to preview")
+            return
+        }
+        MediaViews.gallery(this, "Photos needing date repair", files, null)
+    }
+
+    private fun confirmExif() {
+        confirmGo("Repair photo dates", dryNote() + "Write the filename date into " + exifItems.size + " photos?") {
+            runTask((if (dryRun) "Dry-run EXIF repair" else "EXIF repair")) {
+                val n = ExifRepair.apply(exifItems, dryRun)
+                log((if (dryRun) "Would repair " else "Repaired ") + n + " photos.")
+            }
+        }
+    }
+
+    private fun statusCard(prof: Profiles.WaProfile): View {
+        val c = card()
+        c.addView(titleRow("Status saver"))
+        c.addView(tv("Save the current statuses of your contacts (they disappear after 24h) into Download/WMSuite Statuses, grouped by day.", 12f, COL_SUB))
+        val dir = File(prof.root, ".Statuses")
+        val r = rowH()
+        r.addView(btn2("View statuses") { viewStatuses(dir) }, weighted(r))
+        r.addView(spacer())
+        r.addView(btn("Save statuses") {
+            confirmGo("Save statuses", "Copy the current statuses into Download/WMSuite Statuses?") {
+                runTask((if (dryRun) "Dry-run save statuses" else "Saving statuses")) {
+                    val target = File(File(ext(), "Download"), "WMSuite Statuses")
+                    val res = Cleaner.saveStatuses(dir, target, dryRun)
+                    log((if (dryRun) "Would save " else "Saved ") + res.count + " statuses (" + Cleaner.humanSize(res.bytes) + ") to " + target.absolutePath)
+                }
+            }
+        }, weighted(r))
+        c.addView(r)
+        return c
+    }
+
+    private fun viewStatuses(dir: File) {
+        runTask("Loading statuses") {
+            val files = dir.listFiles()?.filter { it.isFile } ?: emptyList()
+            runOnUiThread {
+                if (files.isEmpty()) toast("No statuses available right now")
+                else MediaViews.gallery(this@MainActivity, "Statuses", files, "expires after 24h")
+            }
+        }
+    }
+
+    private fun organizeCard(prof: Profiles.WaProfile): View {
+        val c = card()
+        c.addView(titleRow("Organize by month"))
+        c.addView(tv("Moves media into yyyy-mm/<category> folders under WMSuite-Organized - handy before copying media to a computer.", 12f, COL_SUB))
+        c.addView(btn("Organize by date") {
+            confirmGo("Organize by date", dryNote() + "Sort media into monthly folders?") {
+                runTask((if (dryRun) "Dry-run organize by date" else "Organizing by date")) {
+                    val out = File(ext(), "WMSuite-Organized")
+                    val res = Cleaner.organizeByDate(prof.root, out, dryRun)
+                    log((if (dryRun) "Would move " else "Moved ") + res.count + " files (" + Cleaner.humanSize(res.bytes) + ") into " + out.absolutePath)
+                }
+            }
+        })
+        return c
+    }
+
+    // ---------- Chats tab ----------
+
+    private fun buildChats(p: LinearLayout) {
+        val c = card()
+        c.addView(titleRow("Organize media by contact - no chat export needed"))
+        c.addView(tv("This reads the encrypted WhatsApp chat backup that is already on your phone (Databases folder) and maps every media file to the chat it belongs to - like the desktop tools wa-sort-media and whatskeep, but fully on your device and offline.", 12f, COL_SUB))
+        c.addView(tv("One-time setup: in WhatsApp open Settings > Chats > Chat backup > End-to-end encrypted backup, turn it ON, choose the 64-digit key option, write the key down, then tap Back up now. Then paste that key below.", 12f, COL_SUB))
+        keyInput = EditText(this)
+        keyInput.hint = "64-digit key (a-z 0-9)"
+        keyInput.setText(keyPref())
+        keyInput.textSize = 13f
+        keyInput.background = roundedBg(COL_CARD2, 8)
+        keyInput.setPadding(dp(10), dp(8), dp(10), dp(8))
+        val klp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        klp.topMargin = dp(6)
+        klp.bottomMargin = dp(6)
+        keyInput.layoutParams = klp
+        c.addView(keyInput)
+        useContactsCb = CheckBox(this)
+        useContactsCb.text = "Use phone contact names (needs Contacts permission)"
+        useContactsCb.textSize = 12f
+        useContactsCb.setTextColor(COL_SUB)
+        c.addView(useContactsCb)
+        moveCb = CheckBox(this)
+        moveCb.text = "Move files instead of copying (faster, but removes them from WhatsApp folders)"
+        moveCb.textSize = 12f
+        moveCb.setTextColor(COL_SUB)
+        c.addView(moveCb)
+        c.addView(btn("Load chat map") { loadContactMap() })
+        mapStatus = tv("", 12f, COL_SUB)
+        c.addView(mapStatus)
+        contactListBox = LinearLayout(this)
+        contactListBox.orientation = LinearLayout.VERTICAL
+        c.addView(contactListBox)
+        val r = rowH()
+        r.addView(btn2("Preview (dry run)") { organizeContacts(true) }, weighted(r))
+        r.addView(spacer())
+        r.addView(btn("Organize now") { organizeContacts(false) }, weighted(r))
+        c.addView(r)
+        p.addView(c)
+
+        val c2 = card()
+        c2.addView(titleRow("Fallback: organize exported chats"))
+        c2.addView(tv("If you prefer not to use the encrypted backup: export chats from WhatsApp (contact chat > menu > More > Export chat > Include media), put the ZIPs in one folder, and choose it below. Media gets copied into WMSuite-Organized/Conversations/<contact>.", 12f, COL_SUB))
+        c2.addView(btn2("Choose exports folder") { pickExportsFolder() })
+        exportsBox = LinearLayout(this)
+        exportsBox.orientation = LinearLayout.VERTICAL
+        val elp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        elp.topMargin = dp(6)
+        exportsBox.layoutParams = elp
+        c2.addView(exportsBox)
+        p.addView(c2)
+    }
+
+    private fun loadContactMap() {
+        val prof = activeProfile
+        if (prof == null) {
+            toast("Pick a WhatsApp profile on the Dashboard tab first")
+            return
+        }
+        val key = keyInput.text.toString().trim()
+        prefs().edit().putString("e2eKey", key).apply()
+        useContacts = useContactsCb.isChecked
+        if (useContacts && checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), 7100)
+            return
+        }
+        runTask("Loading chat map") {
+            val map = ContactOrganizer.buildMap(this@MainActivity, prof.root, key, useContacts) { m -> log(m) }
+            contactMap = map
+            runOnUiThread {
+                if (map == null) {
+                    mapStatus.text = "Could not load the chat map - see the activity log for details."
+                    mapStatus.setTextColor(COL_RED)
+                    contactListBox.removeAllViews()
+                } else {
+                    mapStatus.text = "Loaded " + map.fileToLabel.size + " media references from the " + map.source + "."
+                    mapStatus.setTextColor(COL_GREEN)
+                    renderContactList(map)
+                }
+            }
+        }
+    }
+
+    private fun renderContactList(map: ContactOrganizer.MapInfo) {
+        contactListBox.removeAllViews()
+        val byLabel = LinkedHashMap<String, Int>()
+        for (label in map.fileToLabel.values) {
+            val n = byLabel[label] ?: 0
+            byLabel[label] = n + 1
+        }
+        val sorted = byLabel.entries.sortedByDescending { it.value }
+        var i = 0
+        for (entry in sorted) {
+            if (i >= 60) break
+            i++
+            val row = TextView(this)
+            row.text = entry.key + "  -  " + entry.value + " files"
+            row.textSize = 13f
+            row.setTextColor(COL_TEXT)
+            row.background = roundedBg(COL_CARD2, 8)
+            row.setPadding(dp(10), dp(8), dp(10), dp(8))
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.bottomMargin = dp(6)
+            row.layoutParams = lp
+            row.setOnClickListener { previewContact(map, entry.key) }
+            contactListBox.addView(row)
+        }
+        if (sorted.size > 60) {
+            contactListBox.addView(tv("... and " + (sorted.size - 60) + " more contacts. Tap Preview to see the full dry run in the log.", 12f, COL_SUB))
+        }
+    }
+
+    private fun previewContact(map: ContactOrganizer.MapInfo, label: String) {
+        val prof = activeProfile ?: return
+        runTask("Loading " + label) {
+            val files = ArrayList<File>()
+            prof.root.walkTopDown().filter { it.isFile && map.fileToLabel[it.name] == label }.forEach {
+                if (files.size < 300) files.add(it)
+            }
+            runOnUiThread {
+                if (files.isEmpty()) toast("No media files found for this contact")
+                else MediaViews.gallery(this@MainActivity, label, files, null)
+            }
+        }
+    }
+
+    private fun organizeContacts(forceDry: Boolean) {
+        val prof = activeProfile
+        val map = contactMap
+        if (prof == null) {
+            toast("Pick a WhatsApp profile on the Dashboard tab first")
+            return
+        }
+        if (map == null) {
+            toast("Load the chat map first")
+            return
+        }
+        val dry = dryRun || forceDry
+        val move = moveCb.isChecked
+        val action = if (dry) "Preview the dry run" else if (move) "MOVE files into contact folders" else "Copy files into contact folders"
+        confirmGo("Organize by contact", action + "? Files will be sorted into WMSuite-Organized/By contact/<contact or group>.") {
+            runTask((if (dry) "Dry-run organize by contact" else "Organizing by contact")) {
+                val out = File(File(ext(), "WMSuite-Organized"), "By contact")
+                val res = ContactOrganizer.organize(prof.root, out, map.fileToLabel, move, dry) { m -> log(m) }
+                log((if (dry) "Would sort " else "Sorted ") + res.files + " files into contact folders (" + res.skipped + " unmatched, " + Cleaner.humanSize(res.bytes) + " total).")
+                if (!dry) {
+                    ContactOrganizer.cleanupDecrypted(this@MainActivity)
+                    log("Done - check WMSuite-Organized/By contact with your file manager.")
+                }
+            }
+        }
+    }
+
+    private fun pickExportsFolder() {
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), 7002)
+    }
+
+    private fun refreshExports(dirPath: String) {
+        exportsBox.removeAllViews()
+        val dir = File(dirPath)
+        val exports = ChatExportOrganizer.findExports(dir)
+        if (exports.isEmpty()) {
+            exportsBox.addView(tv("No chat export ZIPs found in " + dirPath, 12f, COL_SUB))
+            return
+        }
+        for (e in exports) {
+            val row = LinearLayout(this)
+            row.orientation = LinearLayout.HORIZONTAL
+            row.gravity = Gravity.CENTER_VERTICAL
+            row.background = roundedBg(COL_CARD2, 8)
+            row.setPadding(dp(10), dp(6), dp(10), dp(6))
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.bottomMargin = dp(6)
+            row.layoutParams = lp
+            row.addView(tv(e.contact + "  -  " + Cleaner.humanSize(e.zip.length()), 12f, COL_TEXT), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(btn2("Import") { importExport(e) })
+            exportsBox.addView(row)
+        }
+    }
+
+    private fun importExport(e: ChatExportOrganizer.Export) {
+        confirmGo("Import " + e.contact, (if (dryRun) "DRY RUN. " else "Media will be copied into WMSuite-Organized/Conversations. ") + "Continue with " + e.zip.name + "?") {
+            runTask("Importing " + e.contact) {
+                val out = File(ext(), "WMSuite-Organized")
+                val res = ChatExportOrganizer.importExport(e.zip, out, dryRun)
+                log((if (dryRun) "Would import " else "Imported ") + res.count + " files (" + Cleaner.humanSize(res.bytes) + ") from " + e.zip.name)
+            }
+        }
     }
 }
