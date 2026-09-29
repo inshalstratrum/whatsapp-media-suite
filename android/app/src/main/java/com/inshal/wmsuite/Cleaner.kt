@@ -31,9 +31,9 @@ object Cleaner {
     // Never offered as cleanable/organizable content on the phone.
     private val PROTECTED_FOLDERS = setOf("Databases", "Backups")
 
-    private val LEGACY_RE = Regex("^(IMG|VID|DOC|AUD|PTT|STK)-(\d{4})(\d{2})(\d{2})-WA\d+\.[A-Za-z0-9]+$")
-    private val MODERN_RE = Regex("^WhatsApp[ _-](Image|Audio|Video|Ptt|Document|Sticker)[ _-](\d{4})-(\d{2})-(\d{2})[ _-]at[ _-](\d{2})\.(\d{2})\.(\d{2})(?: \(\d+\))?\.[A-Za-z0-9]+$")
-    private val BACKUP_RE = Regex("^msgstore.*\.db\.crypt\d+$", RegexOption.IGNORE_CASE)
+    private val LEGACY_RE = Regex("^(IMG|VID|DOC|AUD|PTT|STK)-(\\d{4})(\\d{2})(\\d{2})-WA\\d+\\.[A-Za-z0-9]+$")
+    private val MODERN_RE = Regex("^WhatsApp[ _-](Image|Audio|Video|Ptt|Document|Sticker)[ _-](\\d{4})-(\\d{2})-(\\d{2})[ _-]at[ _-](\\d{2})\\.(\\d{2})\\.(\\d{2})(?: \\(\\d+\\))?\\.[A-Za-z0-9]+$")
+    private val BACKUP_RE = Regex("^msgstore.*\\.db\\.crypt\\d+$", RegexOption.IGNORE_CASE)
 
     fun humanSize(n: Long): String {
         var v = n.toDouble()
