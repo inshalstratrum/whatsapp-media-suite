@@ -1,0 +1,5 @@
+# Runtime dependency (optional but recommended - enables full EXIF fixing)
+piexif>=1.1
+
+# Build tooling (only needed to produce the .exe locally)
+# pyinstaller>=6.0
