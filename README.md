@@ -1,71 +1,44 @@
 # WhatsApp Media Suite
 
-**One suite for everything WhatsApp does to your media - Windows desktop and a native Android app. 100% offline, dry-run by default, your data never leaves the device.**
+All-in-one WhatsApp and WhatsApp Business media manager for Android and Windows. 100% offline, dry-run by default.
+
+Current version: **v2.2.0** - download the APK (Android) or EXE (Windows) from [Releases](https://github.com/inshalstratrum/whatsapp-media-suite/releases).
 
 ## Features
 
-- Scans **WhatsApp and WhatsApp Business** media folders: images, video, video notes, audio, voice notes, documents, stickers, GIFs, wallpapers and statuses.
-- **Finds your media anywhere on the phone**: automatic profile detection, a deep **search of the entire storage** for media folders, and a **manual folder picker** as a fallback for unusual devices.
-- Safe cleaning with a sent/received split, keep-earliest duplicate removal, old-media cleanup and backup pruning.
-- **EXIF date repair** so the gallery shows photos on the right days; status saver; organize-by-date; per-contact organizing via chat exports.
-- Nothing is ever uploaded - the app works completely offline.
+- Finds your WhatsApp / WhatsApp Business media automatically: standard folders, deep full-storage search, or a manually chosen folder
+- Category dashboard with sizes and sent/received split
+- Safe cleaning (dry run first), old-media cleanup, chat backup pruning, empty folder removal
+- **Duplicate finder with side-by-side visual comparison** - see the actual copies with thumbnails before deleting anything
+- **Visual galleries everywhere** - every scan result has a View button with image/video thumbnails
+- Status saver (saves the 24h statuses), EXIF gallery-date repair, organize by month
+- **Organize media by contact** - reads the encrypted chat backup on the phone itself, no chat export needed
+- Collapsible, draggable activity log that stays out of your way
 
-## Downloads
+## Organize by contact (Android, new in v2.2.0)
 
-Get the latest release here: <https://github.com/inshalstratrum/whatsapp-media-suite/releases/latest>
+This works like the desktop tools wa-sort-media and whatskeep, but fully on your phone, offline:
 
-- **WhatsAppMediaSuite.exe** - the Windows desktop app (GUI + CLI), no installation needed.
-- **WhatsAppMediaSuite.apk** - the Android app v2.1.0 with the professional UI (see below).
+1. In WhatsApp: Settings > Chats > Chat backup > End-to-end encrypted backup > turn it ON, choose **Use 64-digit key instead of a password**, write the key down, then tap **Back up now**.
+2. In the app: Chats tab, paste the 64-digit key, tap **Load chat map**.
+3. Review the detected chats and file counts, tap a contact to preview the media, then **Preview (dry run)** or **Organize now**.
 
-## Running from source
+Media gets sorted into folders named after each contact or group under WMSuite-Organized/By contact. Nothing inside WhatsApp is modified when copying.
 
-- **Windows**: pip install -r requirements.txt, then python wmsuite_launch.py.
-- **Android**: open the android/ folder in Android Studio, or run gradle assembleDebug inside it.
+Note: password-protected encrypted backups are not supported - switch to the 64-digit key option and make a fresh backup.
 
-## CLI
+## Install (Android)
 
-The Windows build also exposes a CLI, for example:
-
-    python -m wmsuite scan /sdcard/WhatsApp
-    python -m wmsuite organize <Media-folder> [--mode copy] [--dry-run]
-
-## Organizing by contact (Android chat database)
-
-WhatsApp's chat database is end-to-end encrypted and unreadable without root, so media cannot be linked to contacts automatically on a normal phone. WhatsApp Media Suite instead uses WhatsApp's built-in **Export chat** (with media): the exported ZIP contains the contact name, and the app copies the attachments into per-contact folders. Your chat, the exported ZIP and WhatsApp itself are never modified.
-
-## Android app
-
-Four tabs, everything previewed in a fixed activity log before anything is deleted:
-
-- **Dashboard** - grant storage access; pick the detected WhatsApp / WhatsApp Business profile (the active one is preselected, each profile shows its full folder path). If nothing is found: **Search entire storage** walks the whole shared storage for anything that looks like a WhatsApp media folder, and **Choose media folder manually** lets you point the app at any folder yourself (remembered across restarts). Then scan and review the categories.
-- **Clean** - clean any category with an All / Received / Sent choice and confirmation, clean media older than N days (adjustable stepper), prune old msgstore backups (keep 5 newest), remove empty folders.
-- **Tools** - duplicate finder (size + SHA-256) that **always keeps the earliest original** of each group; **EXIF date repair** that reads the timestamp from the filename and writes it back into the photo EXIF so the gallery shows photos on the right days; status saver; organize-by-date.
-- **Chats** - guided **per-contact organizing**: export chats with media from WhatsApp or WhatsApp Business, and the app copies their attachments into WMSuite-Organized/Conversations/&lt;Contact&gt;/.
-
-A global **dry-run** toggle previews every destructive action first. Databases and Backups are never offered as cleanable categories - your chat history stays safe.
+Download WhatsAppMediaSuite.apk from Releases and install it. If Android refuses to install over the old version, uninstall the old app first (different signing keys), then allow **All files access** when asked.
 
 ## Safety
 
-- Every destructive operation has a **dry-run** (preview) mode, on by default.
-- Every real deletion asks for confirmation first.
-- Duplicate removal on Android **always keeps the earliest original** of every group.
-- Contact organizing **copies** by default; originals stay untouched.
-- It only reads files you point it at and never connects to WhatsApp.
-- Nothing is ever uploaded anywhere - the app is 100% offline.
+Every destructive action starts as a dry run. Turn the DRY RUN chip in the top bar off only when you are sure.
 
-## Project layout
+## Credits
 
-- android/ - the native Android app (Kotlin, programmatic UI).
-- wmsuite/ and wmsuite_launch.py - the Python/Windows app.
-- .github/workflows/ - CI that builds the APK and the Windows EXE and attaches them to the release.
+- [wa-crypt-tools](https://github.com/ElDavoo/wa-crypt-tools) (ElDavoo) - crypt15 key derivation and backup format research (GPL-3.0)
+- [wa-sort-media](https://github.com/chances190/wa-sort-media) and [whatskeep](https://github.com/alissonlinneker/whatskeep) - media-to-chat mapping approach
+- [whatsapp-backup-tools](https://github.com/auanasgheps/whatsapp-backup-tools) - backup tooling inspiration
 
-## License & credits
-
-This project builds on ideas and code from several open-source WhatsApp tools:
-
-- [wa-sort-media](https://github.com/chances190/wa-sort-media) (GPL-3.0)
-- [whatskeep](https://github.com/alissonlinneker/whatskeep) (MIT)
-- [whatsapp-media-tools](https://github.com/ikaruswill/whatsapp-media-tools)
-- [WhatsAppCleaner](https://github.com/VishnuSanal/WhatsAppCleaner) (GPL-3.0)
-
-WhatsApp Media Suite is a third-party tool and is not affiliated with or endorsed by WhatsApp or Meta.
+Licensed under GPL-3.0.

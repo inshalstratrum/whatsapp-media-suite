@@ -57,7 +57,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v2.1.0 "dist/WhatsAppMediaSuite.exe" --repo "$env:GITHUB_REPOSITORY" --title "WhatsApp Media Suite v2.1.0" --notes "All-in-one WhatsApp and WhatsApp Business media manager for Windows and Android. Dry-run by default, 100% offline." || gh release upload v2.1.0 "dist/WhatsAppMediaSuite.exe" --clobber --repo "$env:GITHUB_REPOSITORY"
+          gh release create v2.2.0 "dist/WhatsAppMediaSuite.exe" --repo "$env:GITHUB_REPOSITORY" --title "WhatsApp Media Suite v2.2.0" --notes "v2.2.0: collapsible activity log, visual galleries with side-by-side duplicate comparison, and organize media by contact via the encrypted chat backup. Dry-run by default, 100% offline." || gh release upload v2.2.0 "dist/WhatsAppMediaSuite.exe" --clobber --repo "$env:GITHUB_REPOSITORY"
 
       - name: Record successful build
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
