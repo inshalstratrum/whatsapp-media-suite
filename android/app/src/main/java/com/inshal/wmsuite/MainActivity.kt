@@ -552,7 +552,7 @@ class MainActivity : Activity() {
         keyInput = EditText(this)
         keyInput.hint = "64-digit key (paste it here)"
         keyInput.textSize = 14f
-        keyInput.singleLine = true
+        keyInput.setSingleLine(true)
         keyInput.setTextColor(COL_TEXT)
         keyInput.setHintTextColor(COL_SUB)
         keyInput.background = roundedBg(COL_INPUT, dp(8), COL_STROKE)
@@ -592,7 +592,7 @@ class MainActivity : Activity() {
         exportFolderInput.hint = "Download"
         exportFolderInput.setText("Download")
         exportFolderInput.textSize = 14f
-        exportFolderInput.singleLine = true
+        exportFolderInput.setSingleLine(true)
         exportFolderInput.setTextColor(COL_TEXT)
         exportFolderInput.setHintTextColor(COL_SUB)
         exportFolderInput.background = roundedBg(COL_INPUT, dp(8), COL_STROKE)
