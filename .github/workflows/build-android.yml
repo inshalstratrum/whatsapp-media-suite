@@ -42,7 +42,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp android/app/build/outputs/apk/debug/app-debug.apk WhatsAppMediaSuite.apk
-          gh release create v2.2.0 "WhatsAppMediaSuite.apk" --repo "$GITHUB_REPOSITORY" --title "WhatsApp Media Suite v2.2.0" --notes "v2.2.0: collapsible activity log, visual galleries with side-by-side duplicate comparison, and organize media by contact via the encrypted chat backup. Dry-run by default, 100% offline." || gh release upload v2.2.0 "WhatsAppMediaSuite.apk" --clobber --repo "$GITHUB_REPOSITORY"
+          gh release create v2.3.0 "WhatsAppMediaSuite.apk" --repo "$GITHUB_REPOSITORY" --title "WhatsApp Media Suite v2.3.0" --notes "v2.3.0: organize photos by on-device face detection (people / screenshots / non-human), organize media by contact via the encrypted chat backup, collapsible draggable activity log, visual galleries and side-by-side duplicate comparison. Dry-run by default, 100% offline." || gh release upload v2.3.0 "WhatsAppMediaSuite.apk" --clobber --repo "$GITHUB_REPOSITORY"
 
       - name: Report failure as issue
         if: failure() && github.event_name == 'push'
