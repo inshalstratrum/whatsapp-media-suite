@@ -57,7 +57,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v2.2.0 "dist/WhatsAppMediaSuite.exe" --repo "$env:GITHUB_REPOSITORY" --title "WhatsApp Media Suite v2.2.0" --notes "v2.2.0: collapsible activity log, visual galleries with side-by-side duplicate comparison, and organize media by contact via the encrypted chat backup. Dry-run by default, 100% offline." || gh release upload v2.2.0 "dist/WhatsAppMediaSuite.exe" --clobber --repo "$env:GITHUB_REPOSITORY"
+          gh release create v2.3.0 "dist/WhatsAppMediaSuite.exe" --repo "$env:GITHUB_REPOSITORY" --title "WhatsApp Media Suite v2.3.0" --notes "v2.3.0: organize photos by on-device face detection (people / screenshots / non-human), organize media by contact via the encrypted chat backup, collapsible draggable activity log, visual galleries and side-by-side duplicate comparison. Dry-run by default, 100% offline." || gh release upload v2.3.0 "dist/WhatsAppMediaSuite.exe" --clobber --repo "$env:GITHUB_REPOSITORY"
 
       - name: Record successful build
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -72,6 +72,7 @@ jobs:
           git add .build/last-success.txt
           git commit -m "ci: record successful exe build [skip ci]"
           git push
+          if ($LASTEXITCODE -ne 0) { echo "bookkeeping push skipped (branch moved)" }
 
       - name: Report failure as issue
         if: failure() && github.event_name == 'push'

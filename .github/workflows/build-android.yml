@@ -24,17 +24,6 @@ jobs:
         with:
           gradle-version: "8.7"
 
-      - name: Normalize EditText singleLine usage
-        run: |
-          F="android/app/src/main/java/com/inshal/wmsuite/MainActivity.kt"
-          sed -i 's/\.singleLine = true/.setSingleLine(true)/g' "$F"
-          if ! git diff --quiet; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit -am "fix: replace unsupported singleLine property with setSingleLine(true)"
-            git push origin HEAD:refs/heads/main || echo "source push skipped; building with patched worktree"
-          fi
-
       - name: Build debug APK
         run: |
           cd android
