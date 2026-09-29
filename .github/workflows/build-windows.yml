@@ -57,7 +57,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v2.0.0 "dist/WhatsAppMediaSuite.exe" --repo "$env:GITHUB_REPOSITORY" --title "WhatsApp Media Suite v2.0.0" --notes "All-in-one WhatsApp and WhatsApp Business media manager for Windows and Android. Dry-run by default, 100% offline." || gh release upload v2.0.0 "dist/WhatsAppMediaSuite.exe" --clobber --repo "$env:GITHUB_REPOSITORY"
+          gh release create v2.1.0 "dist/WhatsAppMediaSuite.exe" --repo "$env:GITHUB_REPOSITORY" --title "WhatsApp Media Suite v2.1.0" --notes "All-in-one WhatsAp
+p and WhatsApp Business media manager for Windows and Android. Dry-run by default, 100% offline." || gh release upload v2.1.0 "dist/WhatsAppMediaSuite.exe" --clobber --repo "$env:GITHUB_REPOSITORY"
 
       - name: Record successful build
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -87,5 +88,6 @@ jobs:
           "--- ci-tests.log (tail 150) ---" | Add-Content -Path issue-body.txt
           Get-Content ci-tests.log -Tail 150 -ErrorAction SilentlyContinue | Add-Content -Path issue-body.txt
           "--- ci-build.log (tail 80) ---" | Add-Content -Path issue-body.txt
+
           Get-Content ci-build.log -Tail 80 -ErrorAction SilentlyContinue | Add-Content -Path issue-body.txt
           gh issue create --repo "$env:GITHUB_REPOSITORY" --title "Windows build failed (run $env:GITHUB_RUN_ID)" --body-file issue-body.txt
