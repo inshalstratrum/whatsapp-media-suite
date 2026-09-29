@@ -26,8 +26,7 @@ media, without duplicate features and without touching your account. The Android
 | **Clean** | Tick categories and delete files by category and/or age (older-than-N-days), with dry-run preview first | *WhatsAppCleaner* / *WhatsApp-Cleaner* |
 | **Organize** | Sort the whole media folder into `Contact or Group / Category /` folders using your decrypted `msgstore.db` + contacts (`wa.db` or `contacts.vcf`); or organize by `YYYY-MM / Category` with no database at all; copy or move, dry-run first | *wa-sort-media* + *whatskeep* (both organizers unified into one engine) |
 | **Duplicates** | Fast three-stage duplicate finder (size → first-chunk hash → full hash), keeps the shortest filename, preview then delete | *whatsapp-media-tools* (`find-duplicates.py`) |
-| **Dates** | Restore
- the capture date WhatsApp strips from photos: EXIF `DateTimeOrigi
+| **Dates** | Restore the capture date WhatsApp strips from photos: EXIF `DateTimeOrigi
 nal` for images, created/modified 
 stamps for images + videos, straight from the filename | *whatsapp-media-tools* (`restore-exif.py`) |
 | **Status** | Copy `.Statuses` (24-hour disappearing statuses) into permanent `YYYY-MM-DD` folders before they expire | *WhatsApp-Cleaner* (status saver) |
@@ -79,8 +78,7 @@ python -m wmsuite scan PATH   # CLI (see below)
 ```text
 wmsuite scan <whatsapp-folder>                       # size report per category
 wmsuite clean <folder> --empty-dirs --prune-backups 3 --dry-run
-wmsuite organize <Me
-dia-folder> [--mode contact|date|type]
+wmsuite organize <Media-folder> [--mode contact|date|type]
                  [--msgstore msgstore.db] [--contacts contacts.v
 cf]
                  [--move] [--dry-run]
@@ -122,8 +120,7 @@ of WhatsApp media (including your Downloads folder).
 
 The repo ships a native Android app (in `android/`) with a professional, guided interface - the successor of the two Android cleaner apps merged into this project. It detects **both WhatsApp and WhatsApp Business** automatically (`Android/media/com.whatsapp`, `Android/media/com.whatsapp.w4b` and the legacy `/sdcard` locations), shows which profile is active, and preselects the most recently used one - so scanning always finds your media.
 
-- *
-*Dashboard** - guided setup: storage permission, profile picker (WhatsApp vs WhatsApp Business with file counts, sizes and last-activity badges), storage scan with per-category cards showing a **sent vs received** split.
+- **Dashboard** - guided setup: storage permission, profile picker (WhatsApp vs WhatsApp Business with file counts, sizes and last-activity badges), storage scan with per-category cards showing a **sent vs received** split.
 - **Clean** - clean any category with an *All / Received / Sent* choice and confirmation, clean media older than N days (adjustable stepper), prune old msgstore backups (keep 5 newest), remove empty folders.
 - **Tools** - duplicate finder (size + SHA-256) that **always keeps the earliest original** of each group; **EXIF date repair** that reads the timestamp from the filename and writes it back into the photo EXIF so the gallery shows photos on the right days; status saver; organize-by-date.
 - **Chats** - guided **per-contact organizing**: export chats with media from WhatsApp or WhatsApp Business, and the app copies their attachments into `WMSuite-Organized/Conversations/<Contact>/`. (The chat database is end-to-end encrypted, so chat exports are the safe way to link media to a contact without root - your chat and the exported ZIP are never modified.)
@@ -148,8 +145,7 @@ python -m wmsuite clean /sdcard/WhatsApp/Media --days 30 --dry-run
 
 ## Safety
 
-- Every destructive operation has a **dry-run** (preview) mode,
- and dry run
+- Every destructive operation has a **dry-run** (preview) mode, and dry run
   is ON by default in the GUI.
 - Contact organizing **copies** by default; originals stay untouched.
 - Duplicate removal on Android **always keeps the earliest original** of every group.

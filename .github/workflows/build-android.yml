@@ -57,8 +57,7 @@ jobs:
             echo "Run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo "Commit: $GITHUB_SHA"
             echo ""
-            echo "Build log (last 400
- lines):"
+            echo "Build log (last 400 lines):"
             echo ""
             tail -n 400 ci-apk.log || true
           } > issue-body.txt
